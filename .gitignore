@@ -1,0 +1,17 @@
+# macOS
+.DS_Store
+
+# Logs / temp
+claudecode/.claude/PAI/USER/Voice/logs/
+*.log
+/tmp/
+
+# Audio (runtime artifacts)
+*.mp3
+*.wav
+*.aiff
+
+# Editor / OS
+.idea/
+.vscode/
+*.swp
