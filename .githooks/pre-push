@@ -1,0 +1,14 @@
+#!/bin/bash
+# atlas-voicesystem — block direct pushes to master.
+# Master is protected on GitHub too (required_pull_request_reviews); this hook
+# catches the mistake before it leaves the laptop.
+protected_branch="master"
+while read local_ref local_sha remote_ref remote_sha; do
+  if [ "$remote_ref" = "refs/heads/$protected_branch" ]; then
+    echo "✗ Direct push to '$protected_branch' is blocked." >&2
+    echo "  Open a PR from 'dev' instead:" >&2
+    echo "    gh pr create --base master --head dev" >&2
+    exit 1
+  fi
+done
+exit 0
