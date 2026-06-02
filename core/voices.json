@@ -1,0 +1,140 @@
+{
+  "$schema": "./voices-schema.json",
+  "providers": {
+    "edgetts": {
+      "enabled": true,
+      "defaultVoice": "en-US-AvaNeural",
+      "rate": "+0%",
+      "description": "Microsoft Edge TTS - free, high-quality neural voices"
+    },
+    "kokoro": {
+      "enabled": false,
+      "endpoint": "http://127.0.0.1:8880/v1",
+      "defaultVoice": "af_sky",
+      "description": "Local TTS - free, offline, no API key needed (disabled - service not running)"
+    },
+    "elevenlabs": {
+      "enabled": false,
+      "apiKey": "${ELEVENLABS_API_KEY}",
+      "defaultVoiceId": "s3TPKV1kjDlVtZbl4Ksh",
+      "description": "Premium cloud TTS - requires API key from elevenlabs.io"
+    },
+    "say": {
+      "enabled": true,
+      "voice": "Daniel (Enhanced)",
+      "description": "macOS built-in - always available fallback"
+    }
+  },
+  "defaultProvider": "edgetts",
+  "fallbackOrder": ["edgetts", "elevenlabs", "kokoro", "say"],
+  "default_rate": 175,
+  "default_volume": 0.8,
+  "identity": {
+    "description": "Main assistant voice",
+    "elevenlabs": {
+      "voice_id": "Ioq2c1GJee5RyqeoBIH3",
+      "stability": 0.35,
+      "similarity_boost": 0.8,
+      "style": 0.9,
+      "use_speaker_boost": true
+    },
+    "kokoro": {
+      "voice": "af_heart",
+      "speed": 1.1
+    }
+  },
+  "agents": {
+    "kai": {
+      "description": "UK Male - expressive, warm, enthusiastic helper",
+      "catchphrase": "Kai here, let's do this!",
+      "elevenlabs": {
+        "voice_id": "s3TPKV1kjDlVtZbl4Ksh",
+        "voice_name": "Jamie (Premium)",
+        "stability": 0.5,
+        "similarity_boost": 0.75
+      },
+      "kokoro": {
+        "voice": "am_fenrir",
+        "speed": 1.1
+      }
+    },
+    "researcher": {
+      "description": "Analytical, authoritative, confident researcher",
+      "catchphrase": "Researcher online. Let me investigate.",
+      "elevenlabs": {
+        "voice_id": "AXdMgz6evoL7OPd7eU12",
+        "voice_name": "Ava (Premium)",
+        "stability": 0.65,
+        "similarity_boost": 0.9
+      },
+      "kokoro": {
+        "voice": "af_kore",
+        "speed": 1.0
+      }
+    },
+    "engineer": {
+      "description": "Strategic, measured engineering specialist",
+      "catchphrase": "Engineer ready!",
+      "elevenlabs": {
+        "voice_id": "Fahco4VZzobUeiPqni1S",
+        "voice_name": "Marcus (Premium)",
+        "stability": 0.7,
+        "similarity_boost": 0.85
+      },
+      "kokoro": {
+        "voice": "am_michael",
+        "speed": 0.95
+      }
+    },
+    "architect": {
+      "description": "Strategic, sophisticated architecture specialist",
+      "catchphrase": "Architect online.",
+      "elevenlabs": {
+        "voice_id": "NNl6r8mD7vthiJatiJt1",
+        "voice_name": "Serena (Premium)",
+        "stability": 0.7,
+        "similarity_boost": 0.85
+      },
+      "kokoro": {
+        "voice": "bf_alice",
+        "speed": 0.95
+      }
+    },
+    "designer": {
+      "description": "Sophisticated critic focused on design quality",
+      "catchphrase": "Designer here.",
+      "elevenlabs": {
+        "voice_id": "h8eW5xfRUGVJrZhAFxqK",
+        "voice_name": "Isha (Premium)",
+        "stability": 0.62,
+        "similarity_boost": 0.85
+      },
+      "kokoro": {
+        "voice": "af_nicole",
+        "speed": 1.0
+      }
+    },
+    "writer": {
+      "description": "Articulate, warm, engaging writer",
+      "catchphrase": "Writer at your service.",
+      "elevenlabs": {
+        "voice_id": "goT3UYdM9bhm0n2lmKQx",
+        "voice_name": "Serena (Premium)",
+        "stability": 0.6,
+        "similarity_boost": 0.8
+      },
+      "kokoro": {
+        "voice": "bf_emma",
+        "speed": 0.95
+      }
+    },
+    "qa-tester": {
+      "description": "Methodical quality specialist focused on verification",
+      "catchphrase": "QA Tester active. Running verification.",
+      "kokoro": {
+        "voice": "am_adam",
+        "speed": 0.9
+      }
+    }
+  }
+}

@@ -1,160 +1,113 @@
 # MIGRATIONS
 
-Tracks edits to PAI core files that must be re-applied after upstream PAI updates.
-These edits live OUTSIDE `~/Developer/atlas-voicesystem/` (the upstream-safe zone), so PAI releases may clobber them. After every PAI upgrade, run through this list and re-apply.
+Tracks PAI-side edits that may be clobbered by upstream PAI updates. The atlas voice server itself now lives in this repo as a universal core plus adapters; PAI-specific runtime glue is under `adapters/pai/`.
 
-> **Tip**: `git diff` in `~/.claude/PAI/` after a PAI update reveals what was overwritten.
-
----
-
-## 1. PULSE.toml — disable built-in voice module
-
-**File**: `~/.claude/PAI/PULSE/PULSE.toml`
-
-```toml
-[voice]
-enabled = false  # 2026-05-15: voice now handled by atlas-voicesystem on :8888
-```
-
-Required because Pulse's built-in voice module (ElevenLabs-only, fails on free-tier 402) would otherwise compete for the `/notify` route on :31337.
-
----
-
-## 2. PAI internal callers — 31337 → 8888 (12 files, 15 occurrences)
-
-All `localhost:31337/notify` and `127.0.0.1:31337/notify` references in PAI `.ts` files are rewritten to port 8888.
-
-| File | Occurrences |
-|------|-------------|
-| `~/.claude/PAI/TOOLS/algorithm.ts` | 1 |
-| `~/.claude/PAI/TOOLS/pai.ts` | 2 |
-| `~/.claude/PAI/TOOLS/CostTracker.ts` | 1 |
-| `~/.claude/PAI/TOOLS/IntegrityMaintenance.ts` | 2 |
-| `~/.claude/PAI/TOOLS/ForgeProgress.ts` | 1 |
-| `~/.claude/PAI/TOOLS/AnvilProgress.ts` | 1 |
-| `~/.claude/PAI/PULSE/lib.ts` | 1 |
-| `~/.claude/PAI/PULSE/modules/telegram.ts` | 1 (comment) |
-| `~/.claude/PAI/PULSE/checks/notification-governor.ts` | 1 |
-| `~/.claude/PAI/PAI-Install/cli/index.ts` | 1 |
-| `~/.claude/PAI/PAI-Install/engine/validate.ts` | 1 |
-| `~/.claude/PAI/PAI-Install/engine/actions.ts` | 2 |
-
-**Re-apply** with:
-```bash
-FILES=(
-  ~/.claude/PAI/TOOLS/algorithm.ts
-  ~/.claude/PAI/TOOLS/pai.ts
-  ~/.claude/PAI/TOOLS/CostTracker.ts
-  ~/.claude/PAI/TOOLS/IntegrityMaintenance.ts
-  ~/.claude/PAI/TOOLS/ForgeProgress.ts
-  ~/.claude/PAI/TOOLS/AnvilProgress.ts
-  ~/.claude/PAI/PULSE/lib.ts
-  ~/.claude/PAI/PULSE/modules/telegram.ts
-  ~/.claude/PAI/PULSE/checks/notification-governor.ts
-  ~/.claude/PAI/PAI-Install/cli/index.ts
-  ~/.claude/PAI/PAI-Install/engine/validate.ts
-  ~/.claude/PAI/PAI-Install/engine/actions.ts
-)
-for f in "${FILES[@]}"; do
-  sed -i '' 's|localhost:31337/notify|localhost:8888/notify|g; s|127\.0\.0\.1:31337/notify|127.0.0.1:8888/notify|g' "$f"
-done
-```
-
----
-
-## 3. PAI core hooks — 31337 → 8888 (4 files)
-
-PAI ships its own voice-related hooks at `~/.claude/hooks/`. Retargeted to 8888:
-
-| File | Role |
-|------|------|
-| `~/.claude/hooks/PromptProcessing.hook.ts` | UserPromptSubmit mode classifier |
-| `~/.claude/hooks/StopFailureHandler.hook.ts` | Stop-phase failure notification |
-| `~/.claude/hooks/handlers/DocCrossRefIntegrity.ts` | Doc integrity voice cue |
-| `~/.claude/hooks/handlers/VoiceNotification.ts` | Stop-phase 🗣️ speaker (PAI's own; left in place) |
-
-**Re-apply** with:
-```bash
-for f in $(rg -l "31337/notify" ~/.claude/hooks/); do
-  sed -i '' 's|localhost:31337/notify|localhost:8888/notify|g; s|127\.0\.0\.1:31337/notify|127.0.0.1:8888/notify|g' "$f"
-done
-```
-
----
-
-## 4. settings.json — additive hook registrations + perms
-
-Two additive hook registrations + one chmod. The hooks themselves live inside `~/Developer/atlas-voicesystem/...`, so only the registration entries are upstream-fragile.
-
-**PreToolUse Bash** (additive — added alongside SecurityPipeline + ContextReduction):
-```json
-{ "type": "command",
-  "command": "$HOME/Developer/atlas-voicesystem/claudecode/.claude/PAI/USER/Voice/hooks/VoiceGate.hook.ts" }
-```
-
-**SessionStart matcher="startup"** (new entry):
-```json
-{ "matcher": "startup",
-  "hooks": [{ "type": "command",
-              "command": "$HOME/Developer/atlas-voicesystem/claudecode/.claude/PAI/USER/Voice/hooks/VoiceGreeting.hook.ts" }] }
-```
-
-**Permissions**: `chmod 600 ~/.claude/settings.json` (was 0755 world-readable — RedTeam PT-7 finding).
-
-**Re-apply** by running the Python block at the bottom of this doc.
-
----
-
-## 5. LaunchAgent cleanup (one-time — already done)
-
-Removed orphaned plists that referenced the missing `~/.claude/VoiceServer/server.ts` path:
-- `~/Library/LaunchAgents/com.pai.voice-server.plist` (old, dangling)
-- `~/Library/LaunchAgents/com.paivoice.server.plist` (older, dangling)
-
-The new `com.pai.voice-server.plist` (created by our `install.sh`) references the canonical `~/Developer/atlas-voicesystem/...` path.
-
----
-
-## 6. Markdown docs NOT edited (intentional — review on upgrade)
-
-These reference `localhost:31337/notify` and were left untouched (safer than churning spec docs):
-
-- `~/.claude/CLAUDE.md` (line 19, NATIVE mode example)
-- `~/.claude/PAI/ALGORITHM/v*.md` (5 files, voice command template)
-- `~/.claude/PAI/DOCUMENTATION/Notifications/NotificationSystem.md` (3 places)
-
-When the Algorithm executes voice curls inline as the spec instructs, they hit :31337 — which no longer has a voice route. Result: silent failure for Algorithm phase voice announcements specifically.
-
-**If you want Algorithm phase voice working**, either:
-(a) Edit those markdown files too (add them to this MIGRATIONS list), or
-(b) Tell future-Atlas to dynamically retarget Algorithm voice to :8888 at the time of execution.
-
----
-
-## Re-apply script (combined)
+## Current install/migration model
 
 ```bash
-#!/usr/bin/env bash
-set -euo pipefail
-cd "$(dirname "$0")"
+# Core only
+bash scripts/install.sh --adapter none
 
-# 1. PULSE.toml
-sed -i '' 's|^\(enabled = \)true\(  *#.*atlas-voicesystem.*\)\?$|enabled = false  # voice handled by atlas-voicesystem|' \
-  ~/.claude/PAI/PULSE/PULSE.toml || true
+# Core + PAI hook registration
+bash scripts/install.sh --adapter pai
 
-# 2 + 3. find/replace 31337 → 8888
-find ~/.claude/PAI ~/.claude/hooks -type f \( -name "*.ts" -o -name "*.sh" \) -print0 \
-  | xargs -0 sed -i '' 's|localhost:31337/notify|localhost:8888/notify|g; s|127\.0\.0\.1:31337/notify|127.0.0.1:8888/notify|g'
-
-# 4. settings.json hook registrations + chmod
-python3 ~/Developer/atlas-voicesystem/scripts/restore-hooks.py
-chmod 600 ~/.claude/settings.json
-
-# 5. Bounce Pulse so PULSE.toml takes effect
-launchctl kickstart -k gui/$UID/com.pai.pulse
-
-# 6. Verify
-curl -fsS http://localhost:8888/health > /dev/null && echo "✓ VoiceServer healthy"
+# Core + Pi adapter package
+bash scripts/install.sh --adapter pi
 ```
 
-(A `restore-hooks.py` script can be added to `scripts/` if you want the settings.json re-application fully automated.)
+Neutral service identity:
+
+- LaunchAgent label: `com.atlas.voicesystem`
+- Plist: `~/Library/LaunchAgents/com.atlas.voicesystem.plist`
+- Log: `~/Library/Logs/atlas-voicesystem.log`
+
+The installer unloads the old `com.pai.voice-server` service if loaded and quarantines `~/Library/LaunchAgents/com.pai.voice-server.plist` to prevent login-time port races.
+
+The historical stow path under `claudecode/.claude/PAI/USER/Voice/` remains as compatibility wrappers/config for existing PAI installs. Those wrappers delegate to `core/`, `adapters/pai/`, and root `scripts/`.
+
+## PAI hook registration
+
+Canonical command:
+
+```bash
+bun run adapters/pai/restore-hooks.ts
+```
+
+Compatibility command:
+
+```bash
+bun run scripts/restore-hooks.ts
+```
+
+`adapters/pai/restore-hooks.ts`:
+
+- Derives hook paths from its actual repo location (`import.meta.url`), so clones do not need to live under `~/Developer/atlas-voicesystem`.
+- Treats historical hard-coded paths as duplicate-detection compatibility only.
+- Adds the PAI `VoiceGate.hook.ts` to the existing `PreToolUse` matcher `Bash`.
+- Adds the PAI `VoiceGreeting.hook.ts` to the `SessionStart` matcher `startup`.
+- Backs up `~/.claude/settings.json` before writing.
+- Enforces mode `0600`.
+- Supports `--check` for installer preflight without mutation.
+
+## After a PAI upgrade
+
+1. **Disable PAI/Pulse built-in voice** if the upgrade re-enabled it:
+
+   ```toml
+   # ~/.claude/PAI/PULSE/PULSE.toml
+   [voice]
+   enabled = false
+   ```
+
+2. **Retarget PAI voice curls from Pulse `:31337` to atlas `:8888`**:
+
+   ```bash
+   find ~/.claude/PAI ~/.claude/hooks -type f \( -name "*.ts" -o -name "*.sh" \) -print0 \
+     | xargs -0 sed -i '' \
+       's|localhost:31337/notify|localhost:8888/notify|g; s|127\.0\.0\.1:31337/notify|127.0.0.1:8888/notify|g'
+   ```
+
+3. **Re-apply PAI hook registrations**:
+
+   ```bash
+   bun run ~/Developer/atlas-voicesystem/adapters/pai/restore-hooks.ts
+   ```
+
+4. **Ensure the neutral core service is installed and healthy**:
+
+   ```bash
+   bash ~/Developer/atlas-voicesystem/scripts/install.sh --adapter pai
+   curl -fsS http://localhost:8888/health
+   ```
+
+5. **Verify the old PAI-named voice service is gone**:
+
+   ```bash
+   launchctl list | grep -E 'com\.atlas\.voicesystem|com\.pai\.voice-server' || true
+   ls ~/Library/LaunchAgents/com.pai.voice-server.plist 2>/dev/null && echo "old plist still present"
+   ```
+
+Only `com.atlas.voicesystem` should remain loaded for atlas-voicesystem.
+
+## `/pai` compatibility note
+
+The universal core does **not** expose a PAI-named endpoint. PAI callers should use `POST /notify`. Unsupported POST paths return explicit JSON `404` rather than a false-success `200`.
+
+## Historical affected PAI files
+
+Older investigations found PAI voice references in these areas. The find/replace command above is the current safer reapply path, because exact upstream filenames may drift:
+
+- `~/.claude/PAI/TOOLS/`
+- `~/.claude/PAI/PULSE/`
+- `~/.claude/PAI/PAI-Install/`
+- `~/.claude/hooks/`
+- voice examples embedded in PAI markdown docs
+
+If a PAI upgrade changes where voice calls live, search for both `31337/notify` and `/pai` and migrate active callers to `8888/notify`.
+
+## Verified re-apply log
+
+| Date | What was re-applied | Notes |
+|------|---------------------|-------|
+| 2026-05-21 | PAI voice refs, settings hooks, chmod | Pre-adapter-layout migration. Historical context only; current reapply commands above supersede old hard-coded hook paths and old `com.pai.voice-server` service instructions. |
+| 2026-06-01 | core/adapters layout | Universal core moved to `core/`; PAI hook glue moved to `adapters/pai/`; Pi adapter added under `adapters/pi/`; neutral service identity introduced. |

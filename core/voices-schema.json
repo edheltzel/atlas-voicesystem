@@ -1,0 +1,74 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://atlas-voicesystem.local/voices-schema.json",
+  "title": "Atlas VoiceSystem voice configuration",
+  "type": "object",
+  "required": ["providers", "defaultProvider", "fallbackOrder", "identity", "agents"],
+  "properties": {
+    "providers": {
+      "type": "object",
+      "required": ["edgetts", "kokoro", "elevenlabs", "say"],
+      "additionalProperties": {
+        "$ref": "#/$defs/providerConfig"
+      }
+    },
+    "defaultProvider": { "type": "string" },
+    "fallbackOrder": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "default_rate": { "type": "number" },
+    "default_volume": { "type": "number", "minimum": 0, "maximum": 1 },
+    "identity": { "$ref": "#/$defs/voiceMapping" },
+    "agents": {
+      "type": "object",
+      "additionalProperties": { "$ref": "#/$defs/voiceMapping" }
+    }
+  },
+  "$defs": {
+    "providerConfig": {
+      "type": "object",
+      "required": ["enabled"],
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "apiKey": { "type": "string" },
+        "endpoint": { "type": "string" },
+        "defaultVoice": { "type": "string" },
+        "defaultVoiceId": { "type": "string" },
+        "voice": { "type": "string" },
+        "rate": { "type": "string" },
+        "description": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+    "voiceMapping": {
+      "type": "object",
+      "properties": {
+        "description": { "type": "string" },
+        "catchphrase": { "type": "string" },
+        "elevenlabs": {
+          "type": "object",
+          "properties": {
+            "voice_id": { "type": "string" },
+            "voice_name": { "type": "string" },
+            "stability": { "type": "number" },
+            "similarity_boost": { "type": "number" },
+            "style": { "type": "number" },
+            "use_speaker_boost": { "type": "boolean" }
+          },
+          "additionalProperties": true
+        },
+        "kokoro": {
+          "type": "object",
+          "properties": {
+            "voice": { "type": "string" },
+            "speed": { "type": "number" }
+          },
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": true
+}

@@ -1,0 +1,13 @@
+{
+  "name": "@atlas-voicesystem/pi-adapter",
+  "version": "0.1.0",
+  "description": "Pi host adapter for atlas-voicesystem",
+  "type": "module",
+  "keywords": ["pi-package", "pi", "voice", "tts", "adapter"],
+  "pi": {
+    "extensions": ["./index.ts"]
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": ">=0.78.0"
+  }
+}
