@@ -41,6 +41,10 @@
     "kokoro": {
       "voice": "af_heart",
       "speed": 1.1
+    },
+    "edgetts": {
+      "voice": "en-US-AvaNeural",
+      "speed": 1.0
     }
   },
   "agents": {
@@ -56,6 +60,10 @@
       "kokoro": {
         "voice": "am_fenrir",
         "speed": 1.1
+      },
+      "edgetts": {
+        "voice": "en-GB-RyanNeural",
+        "speed": 1.08
       }
     },
     "researcher": {
@@ -69,6 +77,10 @@
       },
       "kokoro": {
         "voice": "af_kore",
+        "speed": 1.0
+      },
+      "edgetts": {
+        "voice": "en-US-AriaNeural",
         "speed": 1.0
       }
     },
@@ -84,6 +96,10 @@
       "kokoro": {
         "voice": "am_michael",
         "speed": 0.95
+      },
+      "edgetts": {
+        "voice": "en-GB-ThomasNeural",
+        "speed": 0.94
       }
     },
     "architect": {
@@ -98,6 +114,10 @@
       "kokoro": {
         "voice": "bf_alice",
         "speed": 0.95
+      },
+      "edgetts": {
+        "voice": "en-GB-SoniaNeural",
+        "speed": 0.98
       }
     },
     "designer": {
@@ -111,6 +131,10 @@
       },
       "kokoro": {
         "voice": "af_nicole",
+        "speed": 1.0
+      },
+      "edgetts": {
+        "voice": "en-AU-NatashaNeural",
         "speed": 1.0
       }
     },
@@ -126,6 +150,10 @@
       "kokoro": {
         "voice": "bf_emma",
         "speed": 0.95
+      },
+      "edgetts": {
+        "voice": "en-IE-EmilyNeural",
+        "speed": 1.02
       }
     },
     "qa-tester": {
@@ -134,6 +162,10 @@
       "kokoro": {
         "voice": "am_adam",
         "speed": 0.9
+      },
+      "edgetts": {
+        "voice": "en-IE-ConnorNeural",
+        "speed": 0.96
       }
     }
   }
