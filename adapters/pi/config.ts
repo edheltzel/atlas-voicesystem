@@ -30,10 +30,21 @@ export function loadPiVoiceConfig(env: Record<string, string | undefined> = proc
   };
 }
 
-export function shouldSuppressVoice(env: Record<string, string | undefined> = process.env): boolean {
+/** Subset of Pi's ExtensionContext needed to decide suppression. */
+export interface RunContext {
+  mode?: string;
+  hasUI?: boolean;
+}
+
+export function shouldSuppressVoice(
+  ctx: RunContext = {},
+  env: Record<string, string | undefined> = process.env,
+): boolean {
   if (booleanEnv(env.ATLAS_VOICE_SUPPRESS, false)) return true;
-  if (env.PI_SUBAGENT_CHILD === "1") return true;
-  if (env.PI_SUBAGENT_FANOUT_CHILD === "1") return true;
-  if (env.PI_SUBAGENT_PARENT_RUN_ID) return true;
+  // Pi spawns subagents as a child `pi --mode json -p --no-session`. Those headless
+  // run modes have no user-facing UI (ctx.hasUI === false), so to avoid an audio
+  // flood we speak only when a real UI is present. `tui` and `rpc` keep their UI.
+  if (ctx.hasUI === false) return true;
+  if (ctx.mode === "json" || ctx.mode === "print") return true;
   return false;
 }

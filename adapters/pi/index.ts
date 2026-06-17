@@ -43,7 +43,7 @@ export default function atlasVoicePiAdapter(pi: ExtensionAPI): void {
   }
 
   async function speak(message: string, ctx: ExtensionContext): Promise<boolean> {
-    if (config.suppressInSubagents && shouldSuppressVoice()) return false;
+    if (config.suppressInSubagents && shouldSuppressVoice({ mode: ctx.mode, hasUI: ctx.hasUI })) return false;
     try {
       const result = await sendPiNotification(config, message, resolveSessionId(ctx), ctx.signal);
       if (!result.ok) {

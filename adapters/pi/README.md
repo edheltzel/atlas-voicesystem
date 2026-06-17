@@ -20,7 +20,7 @@ bash scripts/install.sh --adapter pi
 
 - `session_start` → speaks a greeting once for user-visible session starts.
 - `message_end` / `turn_end` → extracts the final `🗣️` line from assistant text and speaks it once.
-- Pi subagent environments are suppressed via `PI_SUBAGENT_CHILD`, `PI_SUBAGENT_FANOUT_CHILD`, and related parent-run markers.
+- Headless run modes are suppressed: Pi spawns subagents as `pi --mode json -p`, which report `ctx.hasUI === false`. Voice fires only when a real UI is present (`tui`/`rpc`). Set `ATLAS_VOICE_SUPPRESS=true` to force-mute any context.
 
 ## Configuration
 

@@ -18,14 +18,17 @@ function createMockPi() {
   };
 }
 
-function createContext(sessionId = "session-1") {
+function createContext(sessionId = "session-1", overrides: Record<string, unknown> = {}) {
   return {
+    mode: "tui",
+    hasUI: true,
     sessionManager: {
       getSessionFile: () => undefined,
       getSessionId: () => sessionId,
     },
     signal: undefined,
     ui: { notify: () => {} },
+    ...overrides,
   };
 }
 
@@ -41,14 +44,7 @@ function assistantEvent(id: string, line = "Tests passed.") {
 
 beforeEach(() => {
   process.env = { ...originalEnv };
-  for (const key of [
-    "PI_SUBAGENT_CHILD",
-    "PI_SUBAGENT_FANOUT_CHILD",
-    "PI_SUBAGENT_PARENT_RUN_ID",
-    "ATLAS_VOICE_SUPPRESS",
-  ]) {
-    delete process.env[key];
-  }
+  delete process.env.ATLAS_VOICE_SUPPRESS;
   process.env.ATLAS_VOICE_NOTIFY_URL = "http://voice.example/notify";
   process.env.ATLAS_VOICE_CATCHPHRASE = "Pi session ready.";
   Date.now = originalDateNow;
@@ -120,6 +116,25 @@ describe("Pi adapter lifecycle", () => {
     await handlers.get("turn_end")?.(event, ctx);
 
     expect(payloads).toHaveLength(2);
+  });
+
+  test("headless subagent context speaks nothing", async () => {
+    const payloads: unknown[] = [];
+    globalThis.fetch = async (_input, init) => {
+      payloads.push(JSON.parse(String(init?.body)));
+      return new Response("{}", { status: 200 });
+    };
+
+    const { api, handlers } = createMockPi();
+    atlasVoicePiAdapter(api as any);
+    // Pi spawns subagents as `pi --mode json -p`: headless, hasUI === false.
+    const ctx = createContext("session-1", { mode: "json", hasUI: false });
+
+    await handlers.get("session_start")?.({ reason: "startup" }, ctx);
+    await handlers.get("message_end")?.(assistantEvent("m1"), ctx);
+    await handlers.get("turn_end")?.(assistantEvent("m1"), ctx);
+
+    expect(payloads).toHaveLength(0);
   });
 
   test("dedupe expires so repeated legitimate later turns can speak", async () => {
