@@ -53,6 +53,19 @@ curl -fsS -X POST http://localhost:8888/notify \
 
 The second command should speak aloud unless your provider chain is disabled or muted.
 
+## Choose voices (audition)
+
+`scripts/preview-voices.ts` plays short samples so you can pick voices by ear before editing `core/voices.json`. It calls `edge-tts` directly and is dev tooling — it does not touch the running server.
+
+```bash
+bun scripts/preview-voices.ts --list                 # list English voices, no audio
+bun scripts/preview-voices.ts --locale en-GB         # audition all en-GB voices
+bun scripts/preview-voices.ts --voices en-GB-ThomasNeural --rate -6%
+bun scripts/preview-voices.ts --dry-run --voices en-GB-RyanNeural   # print command, no audio
+```
+
+`--list` and `--dry-run` are silent (CI-safe); the others play audio. See the **Voices** section of `README.md` for the full flag table.
+
 ## Uninstall
 
 ```bash
