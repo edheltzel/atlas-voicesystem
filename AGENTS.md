@@ -85,6 +85,16 @@ Returns provider status, fallback order, circuit-breaker state, pronunciation ru
 
 Unsupported POST paths now return explicit JSON `404`; the universal core does not expose a PAI-named route.
 
+## Voices
+
+Per-persona voices live in `core/voices.json` under `agents`, keyed by a short lowercase name. `getVoiceMapping` (`core/server.ts`) resolves a request `voice_id` by: (1) `agents` name key, (2) any `elevenlabs.voice_id`, (3) `identity`, else the active provider's default. Callers send the **name key** (e.g. `"themis"`), not a raw provider voice id.
+
+**Change a voice:** edit that agent's `edgetts.voice`/`speed`, then reload the daemon (`launchctl kickstart -k "gui/$UID/com.atlas.voicesystem"`). Audition first with `bun scripts/preview-voices.ts --list` / `--locale`.
+
+**Add a voice/persona:** add a keyed entry (mirror an existing one; validate the voice name with `--list`), reload the daemon. Then bind the persona in its `atlas-config` brief (`~/.claude/agents/<Name>.md`): set frontmatter `voiceId: <key>` and make every self-voice `curl` POST `http://localhost:8888/notify` with `"voice_id":"<key>"`. The self-voice instruction must be in the brief **body** (frontmatter isn't visible to the agent). Full walkthrough: README → **Voices**.
+
+`tests/core/voices-config.test.ts` iterates every `agents` entry, so new voices are validated by `bun test`.
+
 ## Development workflow
 
 ```bash

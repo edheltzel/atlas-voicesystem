@@ -120,7 +120,9 @@ Returns provider status, fallback order, circuit-breaker state, pronunciation ru
 
 ## Voices
 
-Voices are configured per agent in `core/voices.json`. The `identity` mapping is the default ("Atlas") voice; named agents — `kai`, `researcher`, `engineer`, `architect`, `designer`, `writer`, `qa-tester` — each carry their own voice. Select one by sending `"voice_id": "<agent>"`; agents without a mapping for the active provider fall back to that provider's default voice.
+Voices are configured per agent in `core/voices.json`. The `identity` mapping is the default ("Atlas") voice; every entry under `agents` is a named persona keyed by a short lowercase name (`engineer`, `architect`, `themis`, `clauderesearcher`, …). Select one by sending `"voice_id": "<key>"`.
+
+**Resolution order** (`getVoiceMapping` in `core/server.ts`): the `voice_id` is matched against (1) an `agents` **name key**, then (2) any agent's `elevenlabs.voice_id`, then (3) the `identity` voice; no match falls back to the active provider's default voice. So callers should send the **name key** (e.g. `"themis"`), not a raw provider voice id.
 
 For the default `edge-tts` provider, each agent maps to a Microsoft neural voice with an optional `speed` (a multiplier converted to edge-tts's `--rate`, e.g. `1.08 → +8%`, `0.94 → -6%`). A `speed` of `1.0` (or no `edgetts` block) uses the global `providers.edgetts.rate`.
 
@@ -129,6 +131,25 @@ For the default `edge-tts` provider, each agent maps to a Microsoft neural voice
   "edgetts": { "voice": "en-GB-ThomasNeural", "speed": 0.94 }
 }
 ```
+
+### Change a persona's voice
+
+1. Audition voices by ear (see below) and confirm the target voice name exists: `bun scripts/preview-voices.ts --list`.
+2. Edit that agent's `edgetts.voice` (and optional `speed`) in `core/voices.json`.
+3. Reload the daemon so it re-reads the config:
+   ```bash
+   launchctl kickstart -k "gui/$UID/com.atlas.voicesystem"
+   ```
+4. Verify: `curl -fsS -X POST http://localhost:8888/notify -H 'Content-Type: application/json' -d '{"message":"voice check","voice_id":"<key>","voice_enabled":true}'`.
+
+### Add a voice or persona
+
+1. **Add the entry** to `agents` in `core/voices.json`, keyed by a new lowercase name. Mirror an existing entry — `description`, optional `catchphrase`, and at least an `edgetts` block (add `kokoro` for parity). Pick a voice not already in use and validate it exists with `--list`. Reload the daemon as above.
+2. **Bind the persona to that key.** A PAI agent/persona only speaks in its voice if its brief tells it to send the key. In the agent definition (`~/.claude/agents/<Name>.md`, sourced from the `atlas-config` repo):
+   - set frontmatter `voiceId: <key>`, and
+   - make every self-voice `curl` POST to `http://localhost:8888/notify` with `"voice_id":"<key>"`.
+
+   Gotchas that cause silence: an agent's frontmatter is **not** visible in its own prompt, so the self-voice instruction must live in the brief **body**; sending a raw ElevenLabs id (instead of the name key) won't resolve while ElevenLabs is disabled; and port `31337` is wrong — voice traffic is `:8888`.
 
 ### Auditioning edge voices
 
