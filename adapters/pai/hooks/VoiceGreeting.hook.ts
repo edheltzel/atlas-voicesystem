@@ -80,7 +80,7 @@ if (claudeProjectDir.includes('/.claude/Agents/')) {
 const NAMED_AGENT_TYPES = [
   'Algorithm', 'Architect', 'Artist', 'ClaudeResearcher', 'CodexResearcher',
   'Designer', 'Engineer', 'GeminiResearcher', 'GrokResearcher', 'Intern',
-  'Pentester', 'PerplexityResearcher', 'QATester',
+  'Pentester', 'PerplexityResearcher', 'QATester', 'Themis',
 ];
 
 const isNamedAgent = agentType != null && NAMED_AGENT_TYPES.includes(agentType);
