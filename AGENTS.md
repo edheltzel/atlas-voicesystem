@@ -121,11 +121,28 @@ tail -f ~/Library/Logs/atlas-voicesystem.log
 
 Use Bun only. Do not introduce npm/npx/node-based workflows.
 
+### Provider reliability (circuit breaker)
+
+`core/circuit-breaker.ts` tracks **provider** (synthesis/network) failures per TTS provider and opens after a shared threshold, skipping the provider for a cooldown then half-opening to retest. Attribution rule: a **local playback** failure (afplay/mpv) is NOT a provider failure and must never call `recordProviderFailure` — `EdgeTTSProvider.speak` splits synthesis (governed by the breaker, retried) from playback (local, never opens the breaker). edge-tts is Microsoft's **online** WebSocket service, so transient blips are retried before a failure is recorded.
+
+Tunable via env (all parsed through `core/env.ts` `parseBoundedInt`, which falls back to the default for missing/non-numeric/below-floor values):
+
+| Env var | Default | Floor |
+|---|---|---|
+| `VOICESYSTEM_CIRCUIT_BREAKER_THRESHOLD` | 2 | 1 |
+| `VOICESYSTEM_EDGETTS_TIMEOUT_MS` | 15000 | 1 |
+| `VOICESYSTEM_EDGETTS_SYNTH_RETRIES` | 1 | 0 |
+| `VOICESYSTEM_EDGETTS_SYNTH_BACKOFF_MS` | 250 | 1 |
+
+The threshold is **global** across edgetts/elevenlabs/kokoro. Worst-case first-turn latency when edge-tts is down is ~30s (2 attempts × 15s + backoff) before fallback; mitigated because `speakWithFallback` is single-pass, so the same turn still falls through to local `say`.
+
 ## File guide
 
 | Purpose | Path |
 |---|---|
 | Universal daemon | `core/server.ts` |
+| Provider circuit breaker | `core/circuit-breaker.ts` |
+| Numeric env parsing | `core/env.ts` |
 | Voice config | `core/voices.json` |
 | Pronunciation config | `core/pronunciations.json` |
 | Shared notify client | `core/notify-client.ts` |
