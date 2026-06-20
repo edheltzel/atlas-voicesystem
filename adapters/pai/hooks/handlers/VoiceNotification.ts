@@ -170,10 +170,12 @@ async function sendNotification(payload: ElevenLabsNotificationPayload, sessionI
  *
  * A main-session persona (e.g. adopting `/Themis`) is NOT a Task subagent, so
  * no env var signals it. The reliable per-turn signal is the response itself:
- * the voice line `🗣️ <Name>:` at the end of the turn. We only match a tag that
- * BEGINS its own line (never an inline mention/quote within prose) and take the
- * LAST such line, mirroring how the voice text is extracted. Returns the
- * lowercase name, or null when the speaker is the DA (Atlas) or no line exists.
+ * by the PAI MODES contract, the `🗣️ <Name>:` voice line is always the FINAL
+ * line of the response. So we honor ONLY a tag on the last non-blank line — and
+ * we first strip fenced ``` code blocks, so a demonstrated/quoted voice line in
+ * a code fence or list (pervasive in this repo's own docs) can NEVER win, even
+ * when the turn ends inside or right after the fence. Returns the lowercase
+ * name, or null when the speaker is the DA (Atlas) or there is no voice line.
  *
  * Self-cleaning: the moment the model stops emitting `🗣️ Themis:`, the next
  * turn resolves to null and reverts to the DA voice. No marker/registry state.
@@ -184,11 +186,22 @@ async function sendNotification(payload: ElevenLabsNotificationPayload, sessionI
  */
 export function resolvePersonaKey(text: string, daName: string): string | null {
   if (!text) return null;
-  // `m` flag + start-of-line anchor: the tag must begin its own line (optionally
-  // indented), so a quoted/inline "🗣️ Name:" inside prose does not hijack it.
-  const matches = [...text.matchAll(/^[ \t]*🗣️[ \t]*\*{0,2}([A-Za-z][A-Za-z0-9_-]*)\*{0,2}[ \t]*:/gm)];
-  if (matches.length === 0) return null;
-  const name = matches[matches.length - 1][1].toLowerCase();
+  // Remove fenced code blocks (balanced, plus any trailing unclosed fence) so a
+  // demonstrated voice line inside ``` is never considered.
+  const stripped = text
+    .replace(/```[\s\S]*?```/g, '')
+    .replace(/```[\s\S]*$/, '');
+  // The voice line is the final line of the turn — find the last non-blank line.
+  const lines = stripped.split('\n');
+  let lastLine = '';
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (lines[i].trim()) { lastLine = lines[i]; break; }
+  }
+  // Match a 🗣️ <Name>: tag that begins that line (optional indent/bold), so an
+  // inline mention or a list/quote prefix (e.g. "- 🗣️ …") does not match.
+  const match = lastLine.match(/^[ \t]*🗣️[ \t]*\*{0,2}([A-Za-z][A-Za-z0-9_-]*)\*{0,2}[ \t]*:/);
+  if (!match) return null;
+  const name = match[1].toLowerCase();
   if (!name || name === daName.toLowerCase()) return null;
   return name;
 }
@@ -196,7 +209,7 @@ export function resolvePersonaKey(text: string, daName: string): string | null {
 // Known persona keys from voices.json (same file the daemon resolves against).
 // Cached per process — the Stop hook is a fresh process each turn.
 let cachedAgentKeys: Set<string> | null = null;
-function loadKnownAgentKeys(): Set<string> {
+export function loadKnownAgentKeys(): Set<string> {
   if (cachedAgentKeys) return cachedAgentKeys;
   try {
     // Mirror the daemon's resolution (core/server.ts): VOICES_PATH env override,
@@ -211,6 +224,11 @@ function loadKnownAgentKeys(): Set<string> {
     cachedAgentKeys = new Set();
   }
   return cachedAgentKeys;
+}
+
+/** Reset the voices.json key cache (test seam). */
+export function clearAgentKeysCache(): void {
+  cachedAgentKeys = null;
 }
 
 export interface VoiceSelection {

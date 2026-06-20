@@ -2,7 +2,13 @@ import { describe, expect, test } from "bun:test";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { buildVoicePayload, resolvePersonaKey, selectVoice } from "../../../adapters/pai/hooks/handlers/VoiceNotification";
+import {
+  buildVoicePayload,
+  clearAgentKeysCache,
+  loadKnownAgentKeys,
+  resolvePersonaKey,
+  selectVoice,
+} from "../../../adapters/pai/hooks/handlers/VoiceNotification";
 import { parseTranscript } from "../../../adapters/pai/hooks/lib/TranscriptParser";
 import type { Identity } from "../../../adapters/pai/hooks/lib/identity";
 import type { ParsedTranscript } from "../../../adapters/pai/hooks/lib/TranscriptParser";
@@ -92,6 +98,36 @@ describe("resolvePersonaKey — persona detection from the 🗣️ speaker tag",
   });
 });
 
+describe("resolvePersonaKey — final-line anchoring (code fences / demos must not win)", () => {
+  const FENCE = "```";
+
+  test("a 🗣️ tag inside a code fence does NOT win (Atlas turn, no trailing voice line)", () => {
+    // RedTeam round-2 repro: docs/AGENTS.md routinely demonstrate the voice format.
+    const text = `The format is:\n${FENCE}\n🗣️ Themis: example\n${FENCE}\nThat's the change.`;
+    expect(resolvePersonaKey(text, "Atlas")).toBeNull();
+  });
+
+  test("a fenced known-persona demo while the real speaker is Atlas → null", () => {
+    const text = `Here is how Themis speaks:\n${FENCE}\n🗣️ Engineer: building it\n${FENCE}\n🗣️ Atlas: documented it.`;
+    expect(resolvePersonaKey(text, "Atlas")).toBeNull();
+  });
+
+  test("a turn ending with a fenced persona line (closing fence is the last line) → null", () => {
+    const text = `Example:\n${FENCE}\n🗣️ Themis: example\n${FENCE}`;
+    expect(resolvePersonaKey(text, "Atlas")).toBeNull();
+  });
+
+  test("a turn ending with an UNCLOSED fenced persona line → null", () => {
+    const text = `Example:\n${FENCE}\n🗣️ Themis: example`;
+    expect(resolvePersonaKey(text, "Atlas")).toBeNull();
+  });
+
+  test("a real persona voice line as the final line still wins (with an earlier fenced demo)", () => {
+    const text = `Reference:\n${FENCE}\n🗣️ Engineer: example\n${FENCE}\n🗣️ Themis: dispatching for real.`;
+    expect(resolvePersonaKey(text, "Atlas")).toBe("themis");
+  });
+});
+
 describe("selectVoice — what the Stop-hook path sends to the voice server", () => {
   test("known persona → sends the resolvable persona key, NOT the hardcoded mainDAVoiceID", () => {
     const sel = selectVoice(parsedWith("🗣️ Themis: coordinating."), ATLAS, KNOWN);
@@ -113,6 +149,13 @@ describe("selectVoice — what the Stop-hook path sends to the voice server", ()
 
   test("inline/quoted tag in an Atlas turn → DA voice (no hijack)", () => {
     const text = "The hook reads the `🗣️ Themis:` tag inline. No real voice line here.";
+    const sel = selectVoice(parsedWith(text), ATLAS, KNOWN);
+    expect(sel.voiceId).toBe(ATLAS.mainDAVoiceID);
+    expect(sel.speaker).toBe("Atlas");
+  });
+
+  test("fenced known-persona demo in an Atlas turn → DA voice (the configured-key gate can't catch this; anchoring must)", () => {
+    const text = "Example of the format:\n```\n🗣️ Themis: example line\n```\nThat's documented.";
     const sel = selectVoice(parsedWith(text), ATLAS, KNOWN);
     expect(sel.voiceId).toBe(ATLAS.mainDAVoiceID);
     expect(sel.speaker).toBe("Atlas");
@@ -218,5 +261,47 @@ describe("integration — full Stop-hook chain (transcript → parse → selectV
         expect(sel.voiceId).toBe(ATLAS.mainDAVoiceID);
       },
     );
+  });
+});
+
+describe("loadKnownAgentKeys — default loader is crash-safe", () => {
+  function withVoicesPath(value: string | undefined, fn: () => void) {
+    const prev = process.env.VOICES_PATH;
+    if (value === undefined) delete process.env.VOICES_PATH;
+    else process.env.VOICES_PATH = value;
+    clearAgentKeysCache();
+    try {
+      fn();
+    } finally {
+      if (prev === undefined) delete process.env.VOICES_PATH;
+      else process.env.VOICES_PATH = prev;
+      clearAgentKeysCache();
+    }
+  }
+
+  test("missing voices.json → empty set, no throw → selectVoice falls back to DA", () => {
+    withVoicesPath("/nonexistent/path/voices.json", () => {
+      expect(() => loadKnownAgentKeys()).not.toThrow();
+      expect(loadKnownAgentKeys().size).toBe(0);
+      // Default loader (no explicit knownAgents) → unknown → DA voice.
+      const sel = selectVoice(parsedWith("🗣️ Themis: go."), ATLAS);
+      expect(sel.voiceId).toBe(ATLAS.mainDAVoiceID);
+    });
+  });
+
+  test("malformed voices.json → empty set, no throw → selectVoice falls back to DA", () => {
+    const root = mkdtempSync(join(tmpdir(), "atlas-bad-voices-"));
+    try {
+      const bad = join(root, "voices.json");
+      writeFileSync(bad, "{ not valid json ");
+      withVoicesPath(bad, () => {
+        expect(() => loadKnownAgentKeys()).not.toThrow();
+        expect(loadKnownAgentKeys().size).toBe(0);
+        const sel = selectVoice(parsedWith("🗣️ Themis: go."), ATLAS);
+        expect(sel.voiceId).toBe(ATLAS.mainDAVoiceID);
+      });
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });
