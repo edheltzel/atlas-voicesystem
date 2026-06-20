@@ -95,7 +95,7 @@ curl -fsS -X POST http://localhost:8888/notify \
   "title": "Voice Notification",
   "message": "Task complete",
   "voice_enabled": true,
-  "voice_id": "kai",
+  "voice_id": "atlas",
   "voice_settings": {
     "stability": 0.5,
     "similarity_boost": 0.75,
@@ -109,6 +109,8 @@ curl -fsS -X POST http://localhost:8888/notify \
 ```
 
 All fields are optional except `message`. `voice_enabled: false` keeps the notification path silent for smoke tests.
+
+`voice_id` takes a persona **name key** from `voices.json` (e.g. `kai`, `themis`). The main Atlas voice is the default — it plays whenever `voice_id` is omitted or doesn't match a configured agent (so `"atlas"` above resolves to that default). See **Voices** for resolution order.
 
 ### `POST /notify/personality`
 
