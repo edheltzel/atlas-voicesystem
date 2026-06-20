@@ -24,6 +24,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { edgeRateFromSpeed } from "./edge-rate";
+import { parseBoundedInt } from "./env";
 import {
   CIRCUIT_BREAKER_RESET_MS,
   CIRCUIT_BREAKER_THRESHOLD,
@@ -547,9 +548,12 @@ function spawnSafe(command: string, args: string[], timeoutMs = NOTIFICATION_PRO
 // provider failure, and keep the synth timeout env-tunable (mirrors the other
 // VOICESYSTEM_*_TIMEOUT_MS knobs). Worst-case added latency is bounded by
 // EDGETTS_SYNTH_RETRIES × (timeout + backoff).
-const EDGETTS_TIMEOUT_MS = parseInt(process.env.VOICESYSTEM_EDGETTS_TIMEOUT_MS || "15000");
-const EDGETTS_SYNTH_RETRIES = parseInt(process.env.VOICESYSTEM_EDGETTS_SYNTH_RETRIES || "1");
-const EDGETTS_SYNTH_BACKOFF_MS = parseInt(process.env.VOICESYSTEM_EDGETTS_SYNTH_BACKOFF_MS || "250");
+// Bounded parses: a NaN/negative/zero override must fall back to the default,
+// never to a degenerate value (0ms timeout = instant fail; 0 retries from NaN
+// would zero the loop → false success). retries floor 0, timeout/backoff floor 1.
+const EDGETTS_TIMEOUT_MS = parseBoundedInt(process.env.VOICESYSTEM_EDGETTS_TIMEOUT_MS, 15000, 1);
+const EDGETTS_SYNTH_RETRIES = parseBoundedInt(process.env.VOICESYSTEM_EDGETTS_SYNTH_RETRIES, 1, 0);
+const EDGETTS_SYNTH_BACKOFF_MS = parseBoundedInt(process.env.VOICESYSTEM_EDGETTS_SYNTH_BACKOFF_MS, 250, 1);
 const PYTHON3_PATH = '/opt/homebrew/bin/python3';
 
 class EdgeTTSProvider implements TTSProvider {
@@ -633,6 +637,15 @@ class EdgeTTSProvider implements TTSProvider {
         } else {
           console.error('❌ Edge TTS synthesis error:', synthError.message || synthError);
         }
+        return false;
+      }
+
+      // Defense-in-depth: only treat this as success if a synthesis attempt
+      // actually ran (tmp is set per attempt). A degenerate loop that ran zero
+      // iterations must NOT report a false success and mask a real outage.
+      if (!tmp) {
+        recordProviderFailure('edgetts');
+        console.error('❌ Edge TTS: no synthesis attempt ran');
         return false;
       }
 
