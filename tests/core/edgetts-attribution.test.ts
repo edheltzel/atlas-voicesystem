@@ -98,7 +98,7 @@ mock.module("node:child_process", () => ({
 
 // Import AFTER the spawn mock + env are in place: the startup banner calls
 // getProviderStatus() at module load, which probes edge-tts via spawn.
-const { providers, voicesConfig, server } = await import("../../core/server.ts");
+const { providers, voicesConfig } = await import("../../core/server.ts");
 
 const edgetts = providers.edgetts;
 const edgeBreaker = circuitBreakers.edgetts;
@@ -118,7 +118,9 @@ afterEach(() => {
 });
 
 afterAll(() => {
-  server?.stop?.();
+  // Do not stop the shared singleton server (cached across test files). Stopping
+  // it here breaks sibling tests that fetch it (see resolution-log.test.ts / #47);
+  // the ephemeral PORT=0 server is reclaimed on `bun test` process exit.
   rmSync(AUDIO_SCRATCH, { recursive: true, force: true });
 });
 

@@ -946,13 +946,21 @@ export async function getProviderStatus(): Promise<Record<string, { enabled: boo
 // Path: user-owned (macOS ~/Library/Logs, else $XDG_STATE_HOME / ~/.local/state),
 // never /tmp, never the repo. Override with VOICESYSTEM_RESOLUTION_LOG. Host-
 // neutral: no host-adapter knowledge here.
+//
+// Resolved at write time (not frozen at module load) so a process that sets the
+// override after import — e.g. a test setting VOICESYSTEM_RESOLUTION_LOG before
+// its first /notify — writes to the intended path regardless of import order.
+// Production behavior is identical: env doesn't change at runtime, so every write
+// resolves the same path the daemon would have captured at startup.
 // =============================================================================
 
-const RESOLUTION_LOG_PATH = process.env.VOICESYSTEM_RESOLUTION_LOG || (
-  process.platform === 'darwin'
-    ? join(homedir(), 'Library', 'Logs', 'atlas-voicesystem', 'voice-resolution.jsonl')
-    : join(process.env.XDG_STATE_HOME || join(homedir(), '.local', 'state'), 'atlas-voicesystem', 'voice-resolution.jsonl')
-);
+function resolveResolutionLogPath(): string {
+  return process.env.VOICESYSTEM_RESOLUTION_LOG || (
+    process.platform === 'darwin'
+      ? join(homedir(), 'Library', 'Logs', 'atlas-voicesystem', 'voice-resolution.jsonl')
+      : join(process.env.XDG_STATE_HOME || join(homedir(), '.local', 'state'), 'atlas-voicesystem', 'voice-resolution.jsonl')
+  );
+}
 
 // ~1MB cap (floor 1KB). Override via VOICESYSTEM_RESOLUTION_LOG_MAX_BYTES.
 const RESOLUTION_LOG_MAX_BYTES = parseBoundedInt(process.env.VOICESYSTEM_RESOLUTION_LOG_MAX_BYTES, 1_000_000, 1024);
@@ -1003,7 +1011,7 @@ function classifyResolution(
 // failures are swallowed so logging can never break a /notify.
 export function writeResolutionEvent(
   event: ResolutionEvent,
-  path: string = RESOLUTION_LOG_PATH,
+  path: string = resolveResolutionLogPath(),
   maxBytes: number = RESOLUTION_LOG_MAX_BYTES,
 ): void {
   try {

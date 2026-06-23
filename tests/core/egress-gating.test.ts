@@ -10,10 +10,12 @@
 // `enabled` is the only gate).
 //
 // PORT=0 binds an ephemeral port so importing the daemon never collides with a
-// running :8888 instance; the server is stopped in afterAll.
+// running :8888 instance. The shared singleton server is intentionally not stopped
+// here — it's cached across test files and stopping it would break siblings that
+// fetch it (see resolution-log.test.ts / #47); the process exit reclaims the port.
 process.env.PORT = "0";
 
-import { afterAll, afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import { EventEmitter } from "node:events";
 import * as realChildProcess from "node:child_process";
 import { circuitBreakers } from "../../core/circuit-breaker.ts";
@@ -51,7 +53,7 @@ function isEdgeTtsSpawn(call: { command: string; args: string[] }): boolean {
   return call.command.includes("python") || call.args.join(" ").includes("edge_tts");
 }
 
-const { providers, getProviderStatus, speakWithFallback, voicesConfig, server } =
+const { providers, getProviderStatus, speakWithFallback, voicesConfig } =
   await import("../../core/server.ts");
 
 const ELEVENLABS_HOST = "elevenlabs.io";
@@ -104,10 +106,6 @@ afterEach(() => {
     breaker.lastFailure = 0;
     breaker.isOpen = false;
   }
-});
-
-afterAll(() => {
-  server?.stop?.();
 });
 
 describe("issue #26 — egress gating: no outbound calls when a provider is disabled", () => {

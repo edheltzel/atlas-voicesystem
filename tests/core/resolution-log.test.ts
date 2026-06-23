@@ -8,8 +8,9 @@
 //      write so the file never exceeds the cap and always keeps the newest line.
 //
 // PORT=0 binds an ephemeral port so importing the daemon never collides with a
-// running :8888 instance. VOICESYSTEM_RESOLUTION_LOG must be set BEFORE importing
-// the server — the daemon resolves the log path once at module load.
+// running :8888 instance. VOICESYSTEM_RESOLUTION_LOG is set before the first
+// /notify; the daemon resolves the log path at write time (not frozen at module
+// load), so this test reads its own temp file regardless of sibling import order.
 process.env.PORT = "0";
 
 import { afterAll, afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
@@ -86,7 +87,12 @@ afterEach(() => {
 });
 
 afterAll(() => {
-  server?.stop?.();
+  // Do NOT stop the shared singleton server here. `export const server` in
+  // core/server.ts is created once and cached across every test file (Bun module
+  // cache); stopping it from one file's afterAll tears it down for sibling files
+  // whose tests then hit it — the source of the #47 flake (port 0 / connection
+  // refused, nondeterministic with file order). The ephemeral PORT=0 server is
+  // reclaimed when the `bun test` process exits.
   rmSync(TMP, { recursive: true, force: true });
 });
 
