@@ -95,7 +95,7 @@ curl -fsS -X POST http://localhost:8888/notify \
   "title": "Voice Notification",
   "message": "Task complete",
   "voice_enabled": true,
-  "voice_id": "kai",
+  "voice_id": "atlas",
   "voice_settings": {
     "stability": 0.5,
     "similarity_boost": 0.75,
@@ -110,6 +110,8 @@ curl -fsS -X POST http://localhost:8888/notify \
 
 All fields are optional except `message`. `voice_enabled: false` keeps the notification path silent for smoke tests.
 
+`voice_id` takes a persona **name key** from `voices.json` (e.g. `kai`, `themis`). The main Atlas voice is the default — it plays whenever `voice_id` is omitted or doesn't match a configured agent (so `"atlas"` above resolves to that default). See **Voices** for resolution order.
+
 ### `POST /notify/personality`
 
 Compatibility endpoint for callers that only provide a `message`.
@@ -117,6 +119,42 @@ Compatibility endpoint for callers that only provide a `message`.
 ### `GET /health`
 
 Returns provider status, fallback order, circuit-breaker state, pronunciation rule count, and emotional preset count.
+
+Each provider entry includes an egress audit — `enabled`, `healthy`, and `wouldEgress` (with `egressTarget` when it's true). A **disabled provider makes zero outbound calls** (no synthesis request, no auth/health probe) and always reports `wouldEgress: false`. Note that the default provider, `edge-tts`, is an **online** Microsoft service, so it *does* egress when enabled — for a fully-local setup, run `kokoro` (local endpoint) or `say` and disable `edgetts`/`elevenlabs`.
+
+### Voice-resolution drop-off log
+
+To make it observable *why* a `/notify` used the voice it did, the daemon appends **one structured JSONL event per voice-enabled `/notify`** to a machine-readable log — separate from the human-readable daemon log (`~/Library/Logs/atlas-voicesystem.log`).
+
+- **Path:** `~/Library/Logs/atlas-voicesystem/voice-resolution.jsonl` on macOS (else `$XDG_STATE_HOME` or `~/.local/state` under `atlas-voicesystem/`). Override with `VOICESYSTEM_RESOLUTION_LOG`.
+- **Retention:** single size-capped file (`~1MB`, override `VOICESYSTEM_RESOLUTION_LOG_MAX_BYTES`). On each write, oldest whole lines are pruned to stay under the cap (newest always kept) — no logrotate, no time-based rotation.
+- **Best-effort:** a write failure is swallowed and never breaks a notification.
+
+Each line:
+
+```json
+{
+  "ts": "2026-06-23T13:16:16.822Z",
+  "requested_voice_id": "themis",
+  "resolution": "agent-key",
+  "provider": "edgetts",
+  "voice": "en-US-MichelleNeural",
+  "hops": 0,
+  "attempts": [{ "provider": "edgetts", "outcome": "success" }],
+  "success": true
+}
+```
+
+| Field | Meaning |
+|---|---|
+| `requested_voice_id` | The `voice_id` the caller sent (`null` if omitted). |
+| `resolution` | How it resolved: `identity-default` (none requested), `identity`, `agent-key`, `elevenlabs-id`, or `fallback`. |
+| `resolution_reason` | Present only when `resolution` is `fallback` — why the id didn't resolve. |
+| `provider` | Provider that actually spoke, or `none` if all failed. |
+| `voice` | Actual provider voice used (`null` on total failure). |
+| `hops` | Providers skipped/failed before the chosen one (`0` = primary spoke first try). |
+| `attempts` | Per-provider outcome trail: `success` \| `failed` \| `unhealthy` \| `circuit-open` \| `disabled`. |
+| `success` | Whether any provider spoke. |
 
 ## Voices
 
@@ -150,6 +188,12 @@ For the default `edge-tts` provider, each agent maps to a Microsoft neural voice
    - make every self-voice `curl` POST to `http://localhost:8888/notify` with `"voice_id":"<key>"`.
 
    Gotchas that cause silence: an agent's frontmatter is **not** visible in its own prompt, so the self-voice instruction must live in the brief **body**; sending a raw ElevenLabs id (instead of the name key) won't resolve while ElevenLabs is disabled; and port `31337` is wrong — voice traffic is `:8888`.
+
+### Per-turn persona voice (PAI Stop hook)
+
+Beyond explicit self-voice `curl`s, the PAI adapter speaks the response's voice line automatically at the end of every turn via the Stop hook `adapters/pai/hooks/VoiceCompletion.hook.ts`. This hook is **persona-aware**: it reads the active speaker from the response's trailing `🗣️ <Name>:` line and sends that lowercase name as the `voice_id`. So when you adopt a main-session persona (e.g. `/Themis`), each turn is spoken in the persona's voice (`themis` → Michelle), not the default Atlas voice. When the speaker is Atlas, or there is no `🗣️` line, it uses the default voice — the Atlas path is unchanged.
+
+The signal is the response itself — no marker files, env vars, or registries — so the moment you stop using a persona, the voice reverts to Atlas on the next turn. For a persona to be voiced this way, its turns must include a `🗣️ <Persona>:` line (the standard response format already does). The hook is registered into `~/.claude/settings.json` by `bash scripts/install.sh --adapter pai` (which runs `restore-hooks.ts`); it replaces any older unmanaged `~/.claude/hooks/VoiceCompletion.hook.ts`.
 
 ### Auditioning edge voices
 

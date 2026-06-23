@@ -36,4 +36,47 @@ describe("core server route contract source", () => {
   test("edge provider derives its rate from the resolved speed via edgeRateFromSpeed", () => {
     expect(server).toContain("edgeRateFromSpeed(settings?.speed, voicesConfig.providers.edgetts?.rate)");
   });
+
+  // --- issue #25: edge-tts fallback tuning (retry + attribution + env knobs) ---
+
+  test("edge-tts synth timeout is env-configurable (VOICESYSTEM_EDGETTS_TIMEOUT_MS, default 15000)", () => {
+    expect(server).toContain("parseBoundedInt(process.env.VOICESYSTEM_EDGETTS_TIMEOUT_MS, 15000, 1)");
+  });
+
+  test("edge-tts retries transient synthesis failures before recording a provider failure", () => {
+    expect(server).toContain("EDGETTS_SYNTH_RETRIES");
+    expect(server).toContain("synthesizeOnce");
+    expect(server).toContain("synth retry");
+  });
+
+  test("a playback failure does NOT count against the edge-tts breaker", () => {
+    // Attribution fix B: synthesis (provider) and playback (local) are
+    // separated. The playback catch returns false WITHOUT recording a provider
+    // failure — only synth-side paths touch the breaker.
+    const playbackCatch = server.match(/catch \(playError[\s\S]*?\n {6}\}/);
+    expect(playbackCatch).not.toBeNull();
+    expect(playbackCatch![0]).toContain("return false;");
+    expect(playbackCatch![0]).not.toContain("recordProviderFailure");
+    expect(server).toContain("playback failed via");
+  });
+
+  test("/health reports the edge-tts circuit breaker (previously omitted)", () => {
+    expect(server).toContain("circuitBreakers.edgetts.isOpen");
+    expect(server).toContain("circuitBreakers.edgetts.failures");
+  });
+
+  test("numeric env overrides are bounded — a bad value cannot mask an outage", () => {
+    // timeout/backoff floor 1 (0ms timeout = instant fail), retries floor 0.
+    expect(server).toContain("parseBoundedInt(process.env.VOICESYSTEM_EDGETTS_TIMEOUT_MS, 15000, 1)");
+    expect(server).toContain("parseBoundedInt(process.env.VOICESYSTEM_EDGETTS_SYNTH_RETRIES, 1, 0)");
+    expect(server).toContain("parseBoundedInt(process.env.VOICESYSTEM_EDGETTS_SYNTH_BACKOFF_MS, 250, 1)");
+    // Raw parseInt on these would let NaN/0/negative through.
+    expect(server).not.toContain("parseInt(process.env.VOICESYSTEM_EDGETTS_TIMEOUT_MS");
+  });
+
+  test("edge-tts success requires a synthesis attempt to have actually run", () => {
+    // Defense-in-depth: a degenerate zero-iteration loop must record a failure,
+    // not a false success.
+    expect(server).toMatch(/if \(!tmp\)[\s\S]*?recordProviderFailure\('edgetts'\)/);
+  });
 });

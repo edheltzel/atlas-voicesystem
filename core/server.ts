@@ -21,9 +21,19 @@
 import { serve } from "bun";
 import { spawn } from "node:child_process";
 import { homedir } from "node:os";
-import { join } from "node:path";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { edgeRateFromSpeed } from "./edge-rate";
+import { parseBoundedInt } from "./env";
+import {
+  CIRCUIT_BREAKER_RESET_MS,
+  CIRCUIT_BREAKER_THRESHOLD,
+  circuitBreakers,
+  recordProviderFailure,
+  recordProviderSuccess,
+  setCircuitBreakerLogger,
+  shouldSkipProvider,
+} from "./circuit-breaker";
 
 // =============================================================================
 // Types and Interfaces
@@ -34,12 +44,6 @@ interface TTSProvider {
   isEnabled(): boolean;
   isHealthy(): Promise<boolean>;
   speak(text: string, voice?: string, settings?: VoiceSettings): Promise<boolean>;
-}
-
-interface CircuitBreakerState {
-  failures: number;
-  lastFailure: number;
-  isOpen: boolean;
 }
 
 interface VoiceSettings {
@@ -253,7 +257,7 @@ function loadVoicesConfig(): VoicesConfig {
 }
 
 // Global config (loaded once at startup)
-const voicesConfig = loadVoicesConfig();
+export const voicesConfig = loadVoicesConfig();
 
 function getMacOSFallbackVoice(): string {
   return voicesConfig.providers.say.voice || DEFAULT_MACOS_VOICE;
@@ -387,51 +391,10 @@ function extractEmotionalMarker(message: string): { cleaned: string; emotion?: s
 // =============================================================================
 // Circuit Breakers - Per-Provider Fast Fallback
 // =============================================================================
+// Breaker state + record/skip logic lives in ./circuit-breaker (host-neutral,
+// unit-tested). Wire it to the server's structured logger here.
 
-const circuitBreakers: Record<string, CircuitBreakerState> = {
-  edgetts: { failures: 0, lastFailure: 0, isOpen: false },
-  elevenlabs: { failures: 0, lastFailure: 0, isOpen: false },
-  kokoro: { failures: 0, lastFailure: 0, isOpen: false },
-};
-
-const CIRCUIT_BREAKER_THRESHOLD = 1;
-const CIRCUIT_BREAKER_RESET_MS = 60_000;
-
-function recordProviderSuccess(provider: string): void {
-  const breaker = circuitBreakers[provider];
-  if (!breaker) return;
-
-  breaker.failures = 0;
-  if (breaker.isOpen) {
-    log('info', `🟢 Circuit CLOSED - ${provider} recovered`);
-    breaker.isOpen = false;
-  }
-}
-
-function recordProviderFailure(provider: string): void {
-  const breaker = circuitBreakers[provider];
-  if (!breaker) return;
-
-  breaker.failures++;
-  breaker.lastFailure = Date.now();
-
-  if (breaker.failures >= CIRCUIT_BREAKER_THRESHOLD && !breaker.isOpen) {
-    breaker.isOpen = true;
-    log('warn', `🔴 Circuit OPEN - ${provider} disabled, using fallback`);
-  }
-}
-
-function shouldSkipProvider(provider: string): boolean {
-  const breaker = circuitBreakers[provider];
-  if (!breaker || !breaker.isOpen) return false;
-
-  if (Date.now() - breaker.lastFailure > CIRCUIT_BREAKER_RESET_MS) {
-    log('info', `🟡 Circuit HALF-OPEN - testing ${provider}`);
-    return false;
-  }
-
-  return true;
-}
+setCircuitBreakerLogger((level, message) => log(level, message));
 
 // =============================================================================
 // Voice Configuration Lookup
@@ -580,7 +543,17 @@ function spawnSafe(command: string, args: string[], timeoutMs = NOTIFICATION_PRO
 // =============================================================================
 
 // --- Edge TTS Provider ---
-const EDGETTS_TIMEOUT_MS = 15_000;
+// edge-tts is Microsoft's ONLINE WebSocket TTS, so transient synthesis blips
+// happen. Retry the synth step a bounded number of times before counting a
+// provider failure, and keep the synth timeout env-tunable (mirrors the other
+// VOICESYSTEM_*_TIMEOUT_MS knobs). Worst-case added latency is bounded by
+// EDGETTS_SYNTH_RETRIES × (timeout + backoff).
+// Bounded parses: a NaN/negative/zero override must fall back to the default,
+// never to a degenerate value (0ms timeout = instant fail; 0 retries from NaN
+// would zero the loop → false success). retries floor 0, timeout/backoff floor 1.
+const EDGETTS_TIMEOUT_MS = parseBoundedInt(process.env.VOICESYSTEM_EDGETTS_TIMEOUT_MS, 15000, 1);
+const EDGETTS_SYNTH_RETRIES = parseBoundedInt(process.env.VOICESYSTEM_EDGETTS_SYNTH_RETRIES, 1, 0);
+const EDGETTS_SYNTH_BACKOFF_MS = parseBoundedInt(process.env.VOICESYSTEM_EDGETTS_SYNTH_BACKOFF_MS, 250, 1);
 const PYTHON3_PATH = '/opt/homebrew/bin/python3';
 
 class EdgeTTSProvider implements TTSProvider {
@@ -607,55 +580,92 @@ class EdgeTTSProvider implements TTSProvider {
     }
   }
 
+  // Synthesize one attempt to outFile. Resolves on success, rejects on a
+  // non-zero exit, spawn error, or timeout — i.e. a genuine PROVIDER failure.
+  private synthesizeOnce(processedText: string, voice: string, rate: string, outFile: string): Promise<void> {
+    const synth = spawn(PYTHON3_PATH, [
+      '-m', 'edge_tts',
+      '--text', processedText,
+      '--voice', voice,
+      '--rate', rate,
+      '--write-media', outFile,
+    ]);
+
+    return new Promise<void>((resolve, reject) => {
+      const timeout = setTimeout(() => { synth.kill(); reject(new Error('Edge TTS synthesis timeout')); }, EDGETTS_TIMEOUT_MS);
+      synth.on('exit', (code) => {
+        clearTimeout(timeout);
+        if ((code ?? 1) === 0) resolve();
+        else reject(new Error(`edge-tts exited with code ${code}`));
+      });
+      synth.on('error', (err) => { clearTimeout(timeout); reject(err); });
+    });
+  }
+
   async speak(text: string, voice?: string, settings?: VoiceSettings): Promise<boolean> {
     const edgettsVoice = voice || voicesConfig.providers.edgetts?.defaultVoice || 'en-US-AvaNeural';
     const rate = edgeRateFromSpeed(settings?.speed, voicesConfig.providers.edgetts?.rate);
+    const processedText = applyPronunciations(text);
     let tmp: { dir: string; file: string } | undefined;
 
-    // Apply pronunciations
-    const processedText = applyPronunciations(text);
-
     try {
-      tmp = createAudioTempFile('edgetts', 'mp3');
-      const tmpFile = tmp.file;
-      console.log(`🌐 Edge TTS speaking (voice: ${edgettsVoice})...`);
-
-      // Synthesize via edge-tts CLI
-      const synth = spawn(PYTHON3_PATH, [
-        '-m', 'edge_tts',
-        '--text', processedText,
-        '--voice', edgettsVoice,
-        '--rate', rate,
-        '--write-media', tmpFile,
-      ]);
-
-      const synthExit = await new Promise<number>((resolve, reject) => {
-        const timeout = setTimeout(() => { synth.kill(); reject(new Error('Edge TTS synthesis timeout')); }, EDGETTS_TIMEOUT_MS);
-        synth.on('exit', (code) => { clearTimeout(timeout); resolve(code ?? 1); });
-        synth.on('error', (err) => { clearTimeout(timeout); reject(err); });
-      });
-
-      if (synthExit !== 0) {
-        throw new Error(`edge-tts exited with code ${synthExit}`);
+      // --- Synthesis (the provider's responsibility → governed by the breaker).
+      //     Retry transient blips with backoff before recording a failure. ---
+      let synthError: any;
+      for (let attempt = 0; attempt <= EDGETTS_SYNTH_RETRIES; attempt++) {
+        if (attempt > 0) {
+          console.warn(`🔁 Edge TTS synth retry ${attempt}/${EDGETTS_SYNTH_RETRIES}...`);
+          await Bun.sleep(EDGETTS_SYNTH_BACKOFF_MS * attempt);
+        }
+        if (tmp) cleanupAudioTempDir(tmp.dir);
+        tmp = createAudioTempFile('edgetts', 'mp3');
+        console.log(`🌐 Edge TTS speaking (voice: ${edgettsVoice})...`);
+        try {
+          await this.synthesizeOnce(processedText, edgettsVoice, rate, tmp.file);
+          synthError = undefined;
+          break;
+        } catch (err) {
+          synthError = err;
+        }
       }
 
-      // Play via afplay (macOS) or mpv/ffplay (Linux)
-      const player = process.platform === 'darwin' ? '/usr/bin/afplay' : 'mpv';
-      const play = spawn(player, [tmpFile]);
+      if (synthError) {
+        // Synthesis failed after all retries → a genuine provider failure.
+        recordProviderFailure('edgetts');
+        if (synthError.message?.includes('timeout')) {
+          console.warn(`⏱️  Edge TTS timeout after ${EDGETTS_TIMEOUT_MS}ms (${EDGETTS_SYNTH_RETRIES} retries exhausted)`);
+        } else {
+          console.error('❌ Edge TTS synthesis error:', synthError.message || synthError);
+        }
+        return false;
+      }
 
-      await waitForProcess(play, player, AUDIO_PROCESS_TIMEOUT_MS);
+      // Defense-in-depth: only treat this as success if a synthesis attempt
+      // actually ran (tmp is set per attempt). A degenerate loop that ran zero
+      // iterations must NOT report a false success and mask a real outage.
+      if (!tmp) {
+        recordProviderFailure('edgetts');
+        console.error('❌ Edge TTS: no synthesis attempt ran');
+        return false;
+      }
 
+      // The online provider did its job — mark it healthy regardless of what
+      // happens during local playback below.
       recordProviderSuccess('edgetts');
+
+      // --- Playback (a LOCAL concern: afplay/mpv). A playback failure must NOT
+      //     open the edge-tts breaker — the provider already succeeded. ---
+      const player = process.platform === 'darwin' ? '/usr/bin/afplay' : 'mpv';
+      try {
+        const play = spawn(player, [tmp!.file]);
+        await waitForProcess(play, player, AUDIO_PROCESS_TIMEOUT_MS);
+      } catch (playError: any) {
+        console.error(`🔇 Edge TTS playback failed via ${player} (local issue, provider unaffected):`, playError.message || playError);
+        return false;
+      }
+
       console.log('✅ Edge TTS completed');
       return true;
-    } catch (error: any) {
-      recordProviderFailure('edgetts');
-      if (error.message?.includes('timeout')) {
-        console.warn(`⏱️  Edge TTS timeout after ${EDGETTS_TIMEOUT_MS}ms`);
-      } else {
-        console.error('❌ Edge TTS error:', error.message || error);
-      }
-      return false;
     } finally {
       if (tmp) cleanupAudioTempDir(tmp.dir);
     }
@@ -871,29 +881,165 @@ class KokoroProvider implements TTSProvider {
 // Provider Management
 // =============================================================================
 
-const providers: Record<string, TTSProvider> = {
+export const providers: Record<string, TTSProvider> = {
   edgetts: new EdgeTTSProvider(),
   elevenlabs: new ElevenLabsProvider(),
   kokoro: new KokoroProvider(),
   say: new MacOSSayProvider(),
 };
 
-async function getProviderStatus(): Promise<Record<string, { enabled: boolean; healthy: boolean; endpoint?: string }>> {
-  const status: Record<string, { enabled: boolean; healthy: boolean; endpoint?: string }> = {};
+// Per-provider egress destination for the /health audit (issue #26). A provider
+// makes an outbound network request only when ENABLED: edge-tts and ElevenLabs
+// always leave the host; Kokoro contacts its configured endpoint (local by
+// default — the returned value makes locality visible); macOS `say` is fully
+// local and never returns a target. The disabled-provider no-egress guarantee
+// is therefore auditable: wouldEgress is false whenever a provider is disabled.
+function egressTargetFor(name: string): string | undefined {
+  switch (name) {
+    case 'edgetts': return 'Microsoft Edge TTS (online)';
+    case 'elevenlabs': return 'api.elevenlabs.io';
+    case 'kokoro': return voicesConfig.providers.kokoro.endpoint || 'http://127.0.0.1:8880/v1';
+    default: return undefined; // 'say' and any other local-only provider
+  }
+}
+
+export async function getProviderStatus(): Promise<Record<string, { enabled: boolean; healthy: boolean; wouldEgress: boolean; egressTarget?: string; endpoint?: string }>> {
+  const status: Record<string, { enabled: boolean; healthy: boolean; wouldEgress: boolean; egressTarget?: string; endpoint?: string }> = {};
 
   for (const [name, provider] of Object.entries(providers)) {
     const enabled = provider.isEnabled();
     const healthy = enabled ? await provider.isHealthy() : false;
+    const egressTarget = egressTargetFor(name);
+    // "Would egress" = currently configured such that using/probing this
+    // provider makes an outbound network request. Gated on enabled, so a
+    // disabled provider always reports false.
+    const wouldEgress = enabled && egressTarget !== undefined;
 
     status[name] = {
       enabled,
       healthy,
+      wouldEgress,
+      ...(wouldEgress && { egressTarget }),
       ...(name === 'kokoro' && { endpoint: voicesConfig.providers.kokoro.endpoint }),
       ...(name === 'elevenlabs' && { apiKeyConfigured: !!resolveEnvVar(voicesConfig.providers.elevenlabs.apiKey) })
     };
   }
 
   return status;
+}
+
+// =============================================================================
+// Voice-resolution drop-off log (issue #24)
+//
+// One structured JSONL event per /notify recording WHY a notification used the
+// voice it did: the requested voice_id, how it resolved (agent key / elevenlabs
+// id / identity / fallback), the provider + voice actually used, and any
+// provider failures, circuit-breaker skips, or fallback hops along the way.
+// This is a machine-readable diagnostics stream, kept SEPARATE from the
+// human-readable daemon log (~/Library/Logs/atlas-voicesystem.log).
+//
+// Retention: a single size-capped JSONL file. On each write the file is pruned
+// back under the cap by dropping the oldest whole lines (newest always kept).
+// No external deps, no logrotate, no time-based rotation. Writes are
+// best-effort — a logging failure must NEVER break a /notify.
+//
+// Path: user-owned (macOS ~/Library/Logs, else $XDG_STATE_HOME / ~/.local/state),
+// never /tmp, never the repo. Override with VOICESYSTEM_RESOLUTION_LOG. Host-
+// neutral: no host-adapter knowledge here.
+//
+// Resolved at write time (not frozen at module load) so a process that sets the
+// override after import — e.g. a test setting VOICESYSTEM_RESOLUTION_LOG before
+// its first /notify — writes to the intended path regardless of import order.
+// Production behavior is identical: env doesn't change at runtime, so every write
+// resolves the same path the daemon would have captured at startup.
+// =============================================================================
+
+function resolveResolutionLogPath(): string {
+  return process.env.VOICESYSTEM_RESOLUTION_LOG || (
+    process.platform === 'darwin'
+      ? join(homedir(), 'Library', 'Logs', 'atlas-voicesystem', 'voice-resolution.jsonl')
+      : join(process.env.XDG_STATE_HOME || join(homedir(), '.local', 'state'), 'atlas-voicesystem', 'voice-resolution.jsonl')
+  );
+}
+
+// ~1MB cap (floor 1KB). Override via VOICESYSTEM_RESOLUTION_LOG_MAX_BYTES.
+const RESOLUTION_LOG_MAX_BYTES = parseBoundedInt(process.env.VOICESYSTEM_RESOLUTION_LOG_MAX_BYTES, 1_000_000, 1024);
+
+type AttemptOutcome = 'success' | 'failed' | 'unhealthy' | 'circuit-open' | 'disabled';
+
+interface SpeakAttempt {
+  provider: string;
+  outcome: AttemptOutcome;
+}
+
+type ResolutionResult =
+  | 'identity-default' // no voice_id requested → identity voice
+  | 'identity'         // voice_id matched the identity mapping
+  | 'agent-key'        // voice_id matched an agents[<key>] entry
+  | 'elevenlabs-id'    // voice_id matched an agent/identity by ElevenLabs voice id
+  | 'fallback';        // voice_id did not resolve → provider default voice
+
+interface ResolutionEvent {
+  ts: string;
+  requested_voice_id: string | null;
+  resolution: ResolutionResult;
+  resolution_reason?: string; // present only when resolution === 'fallback'
+  provider: string;           // provider that spoke, or 'none'
+  voice: string | null;       // actual voice used by that provider
+  hops: number;               // providers skipped/failed before the chosen one
+  attempts: SpeakAttempt[];   // per-provider outcome (failures, circuit-open, skips)
+  success: boolean;
+}
+
+// Classify how a requested voice_id resolved. Derived from the VoiceMapping that
+// getVoiceMapping already returned (not a re-query), mirroring its branch order
+// so the log and the actual resolution can never disagree.
+function classifyResolution(
+  requestedVoiceId: string | null,
+  mapping: VoiceMapping | null,
+): { resolution: ResolutionResult; reason?: string } {
+  if (!requestedVoiceId) return { resolution: 'identity-default' };
+  if (!mapping) {
+    return { resolution: 'fallback', reason: `voice_id "${requestedVoiceId}" did not match any agent or identity` };
+  }
+  if (mapping === voicesConfig.identity) return { resolution: 'identity' };
+  if (voicesConfig.agents[requestedVoiceId] === mapping) return { resolution: 'agent-key' };
+  return { resolution: 'elevenlabs-id' };
+}
+
+// Append one event, then roll the file back under the cap. Best-effort: all
+// failures are swallowed so logging can never break a /notify.
+export function writeResolutionEvent(
+  event: ResolutionEvent,
+  path: string = resolveResolutionLogPath(),
+  maxBytes: number = RESOLUTION_LOG_MAX_BYTES,
+): void {
+  try {
+    const dir = dirname(path);
+    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+    appendFileSync(path, JSON.stringify(event) + '\n');
+    pruneResolutionLog(path, maxBytes);
+  } catch {
+    // swallow — diagnostics logging must never break a notification
+  }
+}
+
+// Rolling prune: if the file exceeds maxBytes, drop the oldest whole lines until
+// it fits, always keeping the newest line. O(n) in line count.
+function pruneResolutionLog(path: string, maxBytes: number): void {
+  if (statSync(path).size <= maxBytes) return;
+  const encoded = readFileSync(path, 'utf-8')
+    .split('\n')
+    .filter((l) => l.length > 0)
+    .map((l) => l + '\n');
+  const sizes = encoded.map((s) => Buffer.byteLength(s));
+  let total = sizes.reduce((a, b) => a + b, 0);
+  let start = 0;
+  while (start < encoded.length - 1 && total > maxBytes) {
+    total -= sizes[start];
+    start++;
+  }
+  writeFileSync(path, encoded.slice(start).join(''));
 }
 
 // =============================================================================
@@ -916,12 +1062,12 @@ const DEFAULT_VOICE_SETTINGS: VoiceSettings = {
   use_speaker_boost: true,
 };
 
-async function speakWithFallback(
+export async function speakWithFallback(
   text: string,
   voiceId?: string,
   callerVoiceSettings?: Partial<VoiceSettings> | null,
   emotion?: string,
-): Promise<{ success: boolean; provider: string }> {
+): Promise<{ success: boolean; provider: string; voice: string | null; attempts: SpeakAttempt[] }> {
   // Build provider order: primary first, then fallback order
   const providerOrder = [
     voicesConfig.defaultProvider,
@@ -931,18 +1077,27 @@ async function speakWithFallback(
   // Get voice mapping for this voice identifier
   const voiceMapping = getVoiceMapping(voiceId || null);
 
+  // Per-provider outcomes, in order, for the resolution drop-off log (#24).
+  const attempts: SpeakAttempt[] = [];
+
   for (const providerName of providerOrder) {
     const provider = providers[providerName];
     if (!provider) continue;
 
     if (!provider.isEnabled()) {
       console.log(`⏭️  Skipping ${providerName} (disabled)`);
+      attempts.push({ provider: providerName, outcome: 'disabled' });
       continue;
     }
 
     const healthy = await provider.isHealthy();
     if (!healthy) {
-      console.log(`⏭️  Skipping ${providerName} (unhealthy)`);
+      // An unhealthy skip is attributed to the circuit breaker when its breaker
+      // is open (the health probe consults shouldSkipProvider); otherwise it's a
+      // genuine health-probe failure.
+      const outcome: AttemptOutcome = circuitBreakers[providerName]?.isOpen ? 'circuit-open' : 'unhealthy';
+      console.log(`⏭️  Skipping ${providerName} (${outcome})`);
+      attempts.push({ provider: providerName, outcome });
       continue;
     }
 
@@ -1014,11 +1169,17 @@ async function speakWithFallback(
       success = false;
     }
     if (success) {
-      return { success: true, provider: providerName };
+      attempts.push({ provider: providerName, outcome: 'success' });
+      // `say` ignores its voice arg and resolves the macOS fallback voice
+      // internally (getMacOSFallbackVoice), so providerVoice is unset for it —
+      // log that real voice rather than null on the most common drop-off path.
+      const actualVoice = providerName === 'say' ? getMacOSFallbackVoice() : (providerVoice ?? null);
+      return { success: true, provider: providerName, voice: actualVoice, attempts };
     }
+    attempts.push({ provider: providerName, outcome: 'failed' });
   }
 
-  return { success: false, provider: 'none' };
+  return { success: false, provider: 'none', voice: null, attempts };
 }
 
 // =============================================================================
@@ -1070,6 +1231,21 @@ async function sendNotification(
       } else {
         console.warn('⚠️  All speech providers failed');
       }
+
+      // One structured resolution drop-off event per /notify (#24). Self-swallows
+      // its own errors; never breaks the notification.
+      const { resolution, reason } = classifyResolution(voiceId, voiceMapping);
+      writeResolutionEvent({
+        ts: logTimestamp(),
+        requested_voice_id: voiceId,
+        resolution,
+        ...(reason && { resolution_reason: reason }),
+        provider: result.provider,
+        voice: result.voice,
+        hops: result.success ? result.attempts.length - 1 : result.attempts.length,
+        attempts: result.attempts,
+        success: result.success,
+      });
     } catch (error) {
       console.error("Failed to speak:", error);
     }
@@ -1115,7 +1291,7 @@ function checkRateLimit(ip: string): boolean {
 // HTTP Server
 // =============================================================================
 
-const server = serve({
+export const server = serve({
   port: PORT,
   async fetch(req) {
     const url = new URL(req.url);
@@ -1230,6 +1406,10 @@ const server = serve({
           pronunciation_rules: pronunciationRules.length,
           emotional_presets: Object.keys(EMOTIONAL_PRESETS).length,
           circuit_breakers: {
+            edgetts: {
+              open: circuitBreakers.edgetts.isOpen,
+              failures: circuitBreakers.edgetts.failures,
+            },
             elevenlabs: {
               open: circuitBreakers.elevenlabs.isOpen,
               failures: circuitBreakers.elevenlabs.failures,

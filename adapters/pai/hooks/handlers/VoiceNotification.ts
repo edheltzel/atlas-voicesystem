@@ -12,15 +12,10 @@
 import { existsSync, readFileSync, appendFileSync, mkdirSync } from 'fs';
 import { join } from 'path';
 import { paiPath } from '../lib/paths';
-import { getIdentity, type VoicePersonality } from '../lib/identity';
+import { getIdentity, type Identity, type VoiceProsody, type VoicePersonality } from '../lib/identity';
 import { getISOTimestamp } from '../lib/time';
 import { isValidVoiceCompletion, getVoiceFallback } from '../lib/output-validators';
-// Inlined 2026-05-15: was `import type { ParsedTranscript } from '../../skills/PAI/Tools/TranscriptParser';`
-// Source path no longer exists in current PAI; the type is small enough to inline.
-interface ParsedTranscript {
-  voiceCompletion: string;
-  [key: string]: unknown;
-}
+import { parseFinalVoiceLine, type ParsedTranscript } from '../lib/TranscriptParser';
 
 const DA_IDENTITY = getIdentity();
 
@@ -171,6 +166,128 @@ async function sendNotification(payload: ElevenLabsNotificationPayload, sessionI
 }
 
 /**
+ * Detect the active main-session persona from the response's 🗣️ voice line.
+ *
+ * A main-session persona (e.g. adopting `/Themis`) is NOT a Task subagent, so
+ * no env var signals it. The reliable per-turn signal is the response itself:
+ * by the PAI MODES contract, the `🗣️ <Name>:` voice line is the FINAL line of
+ * the response and sits at column 0 (a genuine voice line is never indented).
+ *
+ * We parse line-by-line (not regex over the whole string, which is fragile):
+ *  - track fenced-code state with a delimiter toggle (``` and ~~~), so lines in
+ *    a code block are ignored regardless of balance/closure;
+ *  - treat Markdown indented code blocks (≥4 leading spaces or a tab) as code;
+ *  - take the last non-blank, non-code line and accept a 🗣️ <Name>: tag only at
+ *    column 0. So a demonstrated/quoted voice line (in a fence, indented block,
+ *    list, or prose) can never win — pervasive in this repo's own docs.
+ *
+ * Self-cleaning: the moment the model stops emitting `🗣️ Themis:`, the next
+ * turn resolves to null and reverts to the DA voice. No marker/registry state.
+ *
+ * NOTE: this only extracts the name — caller must still validate it against the
+ * configured agents (see selectVoice) so an unknown name never becomes an
+ * unresolvable voice_id (which would degrade to the daemon default, Ava).
+ *
+ * Line selection and name grammar are owned by parseFinalVoiceLine (shared with
+ * the words extractor, so the voice and the spoken words always agree).
+ */
+export function resolvePersonaKey(text: string, daName: string): string | null {
+  const voiceLine = parseFinalVoiceLine(text);
+  if (!voiceLine) return null;
+  const name = voiceLine.name.toLowerCase();
+  if (!name || name === daName.toLowerCase()) return null;
+  return name;
+}
+
+// Known persona keys from voices.json (same file the daemon resolves against).
+// Cached per process — the Stop hook is a fresh process each turn.
+let cachedAgentKeys: Set<string> | null = null;
+export function loadKnownAgentKeys(): Set<string> {
+  if (cachedAgentKeys) return cachedAgentKeys;
+  try {
+    // Mirror the daemon's resolution (core/server.ts): VOICES_PATH env override,
+    // else core/voices.json relative to the repo root (this file lives at
+    // adapters/pai/hooks/handlers/, so the root is four levels up).
+    const voicesPath = process.env.VOICES_PATH || join(import.meta.dir, '..', '..', '..', '..', 'core', 'voices.json');
+    const config = JSON.parse(readFileSync(voicesPath, 'utf-8'));
+    cachedAgentKeys = new Set(Object.keys(config.agents ?? {}));
+  } catch {
+    // Can't read config → treat as "no known personas" so we never send an
+    // unresolvable key; callers fall back to the DA voice.
+    cachedAgentKeys = new Set();
+  }
+  return cachedAgentKeys;
+}
+
+/** Reset the voices.json key cache (test seam). */
+export function clearAgentKeysCache(): void {
+  cachedAgentKeys = null;
+}
+
+export interface VoiceSelection {
+  voiceId: string;
+  /** ElevenLabs prosody for the DA path; omitted for personas so the daemon applies the persona's own config. */
+  voiceSettings?: VoiceProsody;
+  /** Speaker label for the notification title. */
+  speaker: string;
+}
+
+/**
+ * Choose the voice for this turn. A main-session persona (signalled by its
+ * `🗣️ <Name>:` voice line) speaks in its own voice — but ONLY when the resolved
+ * name is a configured agent in voices.json; we send that name key and the
+ * daemon resolves it (e.g. `themis` → en-US-MichelleNeural). An unknown name, a
+ * DA line, or no line → the DA voice (mainDAVoiceID + prosody), byte-for-byte
+ * the previous behavior. We never send an unresolvable key (which would degrade
+ * to the daemon default, Ava — the exact bug this fixes).
+ */
+export function selectVoice(
+  parsed: ParsedTranscript,
+  identity: Identity,
+  knownAgents: Set<string> = loadKnownAgentKeys(),
+): VoiceSelection {
+  const text = parsed.currentResponseText || parsed.lastMessage || '';
+  const personaKey = resolvePersonaKey(text, identity.name);
+  if (personaKey && knownAgents.has(personaKey)) {
+    // Title shows the persona's display name (original-case tag, e.g. "Themis"),
+    // while voice_id stays the lowercase key the daemon resolves (themis →
+    // en-US-MichelleNeural). voices.json has no canonical display-name field, so
+    // the tag's original-case name is the source. parseFinalVoiceLine is the same
+    // canonical parser resolvePersonaKey used, so name/key can never disagree.
+    const displayName = parseFinalVoiceLine(text)?.name ?? personaKey;
+    return { voiceId: personaKey, speaker: displayName };
+  }
+  return { voiceId: identity.mainDAVoiceID, voiceSettings: identity.voice, speaker: identity.name };
+}
+
+/**
+ * Build the voice-server payload for a resolved voice selection. Pure — keeps
+ * the "what gets sent" decision testable without the network or settings I/O.
+ */
+export function buildVoicePayload(
+  message: string,
+  sessionId: string,
+  selection: VoiceSelection,
+): ElevenLabsNotificationPayload {
+  const { voiceId, voiceSettings, speaker } = selection;
+  return {
+    message,
+    title: `${speaker} says`,
+    voice_enabled: true,
+    voice_id: voiceId,
+    session_id: sessionId,
+    source: 'pai',
+    voice_settings: voiceSettings ? {
+      stability: voiceSettings.stability ?? 0.5,
+      similarity_boost: voiceSettings.similarity_boost ?? 0.75,
+      style: voiceSettings.style ?? 0.0,
+      speed: voiceSettings.speed ?? 1.0,
+      use_speaker_boost: voiceSettings.use_speaker_boost ?? true,
+    } : undefined,
+  };
+}
+
+/**
  * Handle voice notification with pre-parsed transcript data.
  * Uses ElevenLabs TTS via the voice server.
  */
@@ -206,25 +323,11 @@ export async function handleVoice(parsed: ParsedTranscript, sessionId: string): 
     // Settings read failed — continue with voice notification
   }
 
-  // Get voice settings from DA identity in settings.json
-  const voiceId = DA_IDENTITY.mainDAVoiceID;
-  const voiceSettings = DA_IDENTITY.voice;
-
-  const payload: ElevenLabsNotificationPayload = {
-    message: voiceCompletion,
-    title: `${DA_IDENTITY.name} says`,
-    voice_enabled: true,
-    voice_id: voiceId,
-    session_id: sessionId,
-    source: 'pai',
-    voice_settings: voiceSettings ? {
-      stability: voiceSettings.stability ?? 0.5,
-      similarity_boost: voiceSettings.similarity_boost ?? 0.75,
-      style: voiceSettings.style ?? 0.0,
-      speed: voiceSettings.speed ?? 1.0,
-      use_speaker_boost: voiceSettings.use_speaker_boost ?? true,
-    } : undefined,
-  };
+  // Resolve the speaker for this turn: an active main-session persona speaks in
+  // its own voice (validated name key → daemon resolves); otherwise the DA voice
+  // path is byte-for-byte unchanged (mainDAVoiceID + prosody).
+  const selection = selectVoice(parsed, DA_IDENTITY);
+  const payload = buildVoicePayload(voiceCompletion, sessionId, selection);
 
   await sendNotification(payload, sessionId);
 }

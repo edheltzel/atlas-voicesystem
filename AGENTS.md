@@ -83,7 +83,33 @@ Compatibility endpoint for callers that only provide a `message`.
 
 Returns provider status, fallback order, circuit-breaker state, pronunciation rule count, and emotional preset count.
 
+Each provider entry carries an **egress audit** (`getProviderStatus` in `core/server.ts`): `enabled`, `healthy`, and `wouldEgress` (true only when the provider is *both* enabled and makes an outbound network request when used), plus `egressTarget` when `wouldEgress` is true. This makes the gating guarantee auditable at a glance — a disabled provider always reports `wouldEgress: false` and omits `egressTarget`.
+
 Unsupported POST paths now return explicit JSON `404`; the universal core does not expose a PAI-named route.
+
+### Provider egress gating
+
+A **disabled** provider makes **zero** outbound network calls — no synthesis request and no auth/health probe. The guarantee is structural, not best-effort:
+
+- `speakWithFallback` (`core/server.ts`) checks `provider.isEnabled()` and `continue`s **before** ever calling `isHealthy()` or `speak()`, so a disabled provider's network paths are unreachable.
+- `getProviderStatus` only runs `isHealthy()` `if (enabled)`, so the `/health` probe never reaches a disabled provider either.
+- `ElevenLabsProvider.isEnabled()` requires `enabled:true` **and** an API key; `isHealthy()` makes no network call (the key is read in the constructor). With ElevenLabs disabled, nothing ever reaches `api.elevenlabs.io`.
+- `KokoroProvider` is contacted **only when enabled** — `isHealthy()` short-circuits on `!isEnabled()` before probing its endpoint, and `speak()` is gated by the same `isEnabled()` check upstream.
+
+Proven by `tests/core/egress-gating.test.ts` (spies `fetch`; asserts zero calls for a disabled provider across both `speakWithFallback` and `getProviderStatus`, and that enabling a provider is the only thing that flips egress on).
+
+**edge-tts egresses by default.** The default provider (`edgetts`) is Microsoft's **online** TTS service, so "no external calls" is not the out-of-the-box state — edge-tts leaves the host to Microsoft (see #1). For a fully-local setup, run a local provider (`kokoro` against a local endpoint, or `say`) and disable `edgetts`/`elevenlabs`; `/health` `wouldEgress` flags then read `false`/local for every enabled provider.
+
+### Voice-resolution drop-off log (#24)
+
+To make voice-selection drop-offs observable — why a `/notify` used the default voice (unresolved `voice_id`, provider failure, circuit-breaker open, fallback hop) — the daemon appends **one structured JSONL event per voice-enabled `/notify`**. This is host-neutral and lives entirely in `core/server.ts`: a self-contained helper block (`writeResolutionEvent` + rolling `pruneResolutionLog` + `classifyResolution`, just above `speakWithFallback`), plus `speakWithFallback` returning a per-provider `attempts` trail and the actual `voice` used, and a single `writeResolutionEvent` call in `sendNotification`'s voice-enabled path.
+
+- **Path (user-owned, never `/tmp`/repo):** macOS `~/Library/Logs/atlas-voicesystem/voice-resolution.jsonl`, else `$XDG_STATE_HOME`/`~/.local/state` under `atlas-voicesystem/`. Override `VOICESYSTEM_RESOLUTION_LOG`. **Separate** from the human log `~/Library/Logs/atlas-voicesystem.log`.
+- **Retention:** single size-capped file, `~1MB` default (override `VOICESYSTEM_RESOLUTION_LOG_MAX_BYTES`, floor 1KB via `parseBoundedInt`). On each write, oldest whole lines are pruned to stay under the cap; the newest line is always kept. No external deps, no time-based rotation.
+- **Best-effort:** all write/prune errors are swallowed — logging must never break a `/notify`.
+- **Fields:** `ts`, `requested_voice_id` (`null` if omitted), `resolution` (`identity-default` \| `identity` \| `agent-key` \| `elevenlabs-id` \| `fallback`), `resolution_reason` (fallback only), `provider` (or `none`), `voice` (actual, or `null`), `hops` (providers skipped/failed before the chosen one), `attempts[]` (`{provider, outcome}` where outcome ∈ `success`/`failed`/`unhealthy`/`circuit-open`/`disabled`), `success`. `classifyResolution` derives the resolution from the `VoiceMapping` `getVoiceMapping` already returned (not a re-query), so the log can never disagree with the actual resolution. A `circuit-open` outcome is read from the imported `circuitBreakers` map (the provider's health probe consults `shouldSkipProvider`).
+
+Proven by `tests/core/resolution-log.test.ts`: one `/notify` writes exactly one event with the expected fields, and the rolling prune is driven past the cap (file never exceeds it, newest lines kept, a single over-cap line is still retained).
 
 ## Voices
 
@@ -94,6 +120,14 @@ Per-persona voices live in `core/voices.json` under `agents`, keyed by a short l
 **Add a voice/persona:** add a keyed entry (mirror an existing one; validate the voice name with `--list`), reload the daemon. Then bind the persona in its `atlas-config` brief (`~/.claude/agents/<Name>.md`): set frontmatter `voiceId: <key>` and make every self-voice `curl` POST `http://localhost:8888/notify` with `"voice_id":"<key>"`. The self-voice instruction must be in the brief **body** (frontmatter isn't visible to the agent). Full walkthrough: README → **Voices**.
 
 `tests/core/voices-config.test.ts` iterates every `agents` entry, so new voices are validated by `bun test`.
+
+### Per-turn persona voice (Stop hook)
+
+Every turn, the PAI Stop hook `adapters/pai/hooks/VoiceCompletion.hook.ts` speaks the response's voice line. It is **persona-aware in both voice and words**: a single canonical parser `parseFinalVoiceLine` (`adapters/pai/hooks/lib/TranscriptParser.ts`) reads the response's trailing `🗣️ <Name>:` tag into `{name, words}`, and both the voice resolver and the words extractor consume it so the chosen voice and the spoken words can never disagree. `handleVoice` (`adapters/pai/hooks/handlers/VoiceNotification.ts`) calls `selectVoice`/`resolvePersonaKey` (which delegate to `parseFinalVoiceLine`) for the **voice**; `extractVoiceCompletion` (same parser) yields the **words**. When `<Name>` is a non-DA persona (e.g. `🗣️ Themis:`), the hook sends that lowercase **name key** as `voice_id` (daemon resolves `themis` → `en-US-MichelleNeural`) and speaks the persona's own line. When the speaker is the DA (Atlas) or there is no tag, both voice (`mainDAVoiceID` + prosody) and words are the unchanged Atlas path.
+
+This is DRY and self-cleaning: the signal is the response the hook already parses (no marker files, env vars, or registries), so dropping a persona reverts to Atlas on the next turn automatically. For a **main-session** persona to be voiced, its turns must carry the `🗣️ <Persona>:` tag (the global response format already does this). `parseFinalVoiceLine`/`resolvePersonaKey`/`selectVoice` are covered by `tests/adapters/pai/voice-persona-resolution.test.ts`; `extractVoiceCompletion`'s persona-words behavior by `tests/adapters/pai/voice-completion-words.test.ts`.
+
+The Stop hook is repo-owned and registered into `settings.json` by `restore-hooks.ts` (replacing any unmanaged `~/.claude/hooks/VoiceCompletion.hook.ts`), alongside VoiceGate and VoiceGreeting. Its transcript parsing lives in `adapters/pai/hooks/lib/{hook-io,TranscriptParser}.ts` (PAI-specific — never in `core/`).
 
 ## Development workflow
 
@@ -113,15 +147,35 @@ tail -f ~/Library/Logs/atlas-voicesystem.log
 
 Use Bun only. Do not introduce npm/npx/node-based workflows.
 
+### Provider reliability (circuit breaker)
+
+`core/circuit-breaker.ts` tracks **provider** (synthesis/network) failures per TTS provider and opens after a shared threshold, skipping the provider for a cooldown then half-opening to retest. Attribution rule: a **local playback** failure (afplay/mpv) is NOT a provider failure and must never call `recordProviderFailure` — `EdgeTTSProvider.speak` splits synthesis (governed by the breaker, retried) from playback (local, never opens the breaker). edge-tts is Microsoft's **online** WebSocket service, so transient blips are retried before a failure is recorded.
+
+Tunable via env (all parsed through `core/env.ts` `parseBoundedInt`, which falls back to the default for missing/non-numeric/below-floor values):
+
+| Env var | Default | Floor |
+|---|---|---|
+| `VOICESYSTEM_CIRCUIT_BREAKER_THRESHOLD` | 2 | 1 |
+| `VOICESYSTEM_EDGETTS_TIMEOUT_MS` | 15000 | 1 |
+| `VOICESYSTEM_EDGETTS_SYNTH_RETRIES` | 1 | 0 |
+| `VOICESYSTEM_EDGETTS_SYNTH_BACKOFF_MS` | 250 | 1 |
+
+The threshold is **global** across edgetts/elevenlabs/kokoro. Worst-case first-turn latency when edge-tts is down is ~30s (2 attempts × 15s + backoff) before fallback; mitigated because `speakWithFallback` is single-pass, so the same turn still falls through to local `say`.
+
 ## File guide
 
 | Purpose | Path |
 |---|---|
 | Universal daemon | `core/server.ts` |
+| Provider circuit breaker | `core/circuit-breaker.ts` |
+| Numeric env parsing | `core/env.ts` |
 | Voice config | `core/voices.json` |
 | Pronunciation config | `core/pronunciations.json` |
 | Shared notify client | `core/notify-client.ts` |
 | PAI hooks | `adapters/pai/hooks/` |
+| Per-turn voice (Stop hook) | `adapters/pai/hooks/VoiceCompletion.hook.ts` |
+| Per-turn voice handler | `adapters/pai/hooks/handlers/VoiceNotification.ts` |
+| Transcript parsing (PAI) | `adapters/pai/hooks/lib/{hook-io,TranscriptParser}.ts` |
 | PAI hook registration | `adapters/pai/restore-hooks.ts` |
 | Pi extension package | `adapters/pi/` |
 | Neutral install/lifecycle | `scripts/` |
@@ -139,6 +193,7 @@ Use Bun only. Do not introduce npm/npx/node-based workflows.
 - Do not add new `localhost:31337` references; voice server traffic is `:8888`.
 - Do not broad-kill whatever owns port `8888`; it may be another service.
 - Do not commit secrets or `.env` files.
+- Do not call `server.stop()` from a test file's `afterAll`. `export const server` in `core/server.ts` is a singleton cached across every test file (Bun module cache); stopping it from one file tears it down for siblings that fetch it — the source of the #47 flake (`port 0` / connection refused, nondeterministic with file order). The ephemeral `PORT=0` server is reclaimed on `bun test` process exit.
 - Do not push directly to `master`; work on `dev` and open PRs from `dev` to `master`.
 
 ## Adapter rules
@@ -151,6 +206,15 @@ Adapters are out-of-process host integrations. They should:
 4. POST to `http://localhost:8888/notify`.
 5. Treat notify failures as non-fatal host-session warnings.
 6. Suppress child/subagent contexts to avoid audio floods.
+
+### Pi adapter — per-turn completions (issue #15)
+
+Pi's own models don't emit the PAI `🗣️` line on their own, so the Pi adapter **injects** the convention. On `before_agent_start` (`adapters/pi/index.ts`) it appends an instruction to the chained `event.systemPrompt` (feature-detected; falls back to `systemPromptAppend`; no-ops on older runtimes) telling the model to end each response with `🗣️ <Name>: <8–16 word summary>`. The existing `message_end`/`turn_end` path then extracts and speaks that line — so Pi speaks per-turn completions like the Claude Code path, not just the startup greeting.
+
+- **Persona name** comes from config: `personaName` ← env `ATLAS_VOICE_PERSONA_NAME` (default `"Atlas"`), never hard-coded.
+- Injection is gated on `config.speakCompletions` (default on) **and** the same `shouldSuppressVoice` check the speak side uses (headless/subagent stays silent).
+- `extractVoiceLineFromText` (`adapters/pi/voice-line.ts`) strips an optional leading `<Name>:` (mirroring PAI's `parseFinalVoiceLine` name grammar) so the persona name isn't spoken aloud.
+- Adapter-only: no `core/` or daemon change; the daemon already resolves `voice_id` name keys.
 
 ## PAI compatibility path
 
