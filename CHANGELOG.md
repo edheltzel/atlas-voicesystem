@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-06-28
+
+Rename the Claude Code adapter and neutralize the public PAI surface (#59). `core/` was already
+host-neutral; this completes the public, PAI-independent repo. Pi adapter untouched.
+
+### Breaking
+
+- Renamed the Claude Code adapter `adapters/pai` → `adapters/claudecode`. The install flag is now
+  `--adapter claudecode` (was `--adapter pai`). **Existing installs must repoint:** re-run
+  `bash scripts/install.sh --adapter claudecode`, or update the three voice hook command paths in
+  `~/.claude/settings.json` from `adapters/pai/hooks/` to `adapters/claudecode/hooks/`.
+- `NotifyPayload.source` emitted by the Claude Code adapter changed from `'pai'` to `'claudecode'`
+  (parity with the Pi adapter's `'pi'`). Affects only the human-readable log annotation; no
+  consumer branches on the value.
+
+### Changed
+
+- Stripped the legacy/historical hook-registration machinery from the adapter registrar
+  (`restore-hooks.ts`); it now knows only `adapters/claudecode/hooks/*` and registers idempotently.
+  The reconciliation now de-dupes within a matcher block (`.find()` → `.filter()`).
+- Default adapter identity is now neutral (`'Assistant'`), with `identity.ts` as the single source
+  of truth (removed hardcoded DA-name fallbacks).
+- De-PAI'd the public documentation surface (README, AGENTS.md, ARCHITECTURE.md, docs/*).
+
+### Removed
+
+- `MIGRATIONS.md` — documented a private PAI integration; `CHANGELOG.md` serves public releases.
+
+### Added
+
+- Guard test (`tests/core/architecture-invariants.test.ts`, Invariant 6): no tracked `adapters/pai/`
+  path and no `--adapter pai` in the installer, so the old adapter name cannot return.
+
 ## [0.2.0] - 2026-06-25
 
 Retire the legacy PAI stow tree; host integration is adapter-only. The adapter rename and full
