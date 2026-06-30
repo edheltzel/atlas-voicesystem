@@ -95,8 +95,8 @@ Initial release of the universal voice-system core plus PAI and Pi host adapters
 
 - Behavioral edge-tts synth/playback attribution test (#38); egress-gating, circuit-breaker, env-parsing, and persona-resolution coverage.
 
-[Unreleased]: https://github.com/edheltzel/atlas-echo/compare/v0.3.0...HEAD
-[0.3.0]: https://github.com/edheltzel/atlas-echo/compare/v0.2.0...v0.3.0
-[0.2.0]: https://github.com/edheltzel/atlas-echo/compare/v0.1.1...v0.2.0
-[0.1.1]: https://github.com/edheltzel/atlas-echo/releases/tag/v0.1.1
-[0.1.0]: https://github.com/edheltzel/atlas-echo/releases/tag/v0.1.0
+[Unreleased]: https://github.com/edheltzel/atlas-voicesystem/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/edheltzel/atlas-voicesystem/compare/v0.2.0...v0.3.0
+[0.2.0]: https://github.com/edheltzel/atlas-voicesystem/compare/v0.1.1...v0.2.0
+[0.1.1]: https://github.com/edheltzel/atlas-voicesystem/releases/tag/v0.1.1
+[0.1.0]: https://github.com/edheltzel/atlas-voicesystem/releases/tag/v0.1.0
