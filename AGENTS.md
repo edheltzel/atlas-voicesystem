@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Lean entry point for agents working on `atlas-echo`. This file is the build/test
+Lean entry point for agents working on `echo`. This file is the build/test
 commands, the repo map, the hard invariants, and the DOX rail. Architecture and per-area
 detail live behind the pointers below — load them on demand (progressive disclosure).
 
@@ -34,12 +34,13 @@ curl -fsS -X POST http://localhost:8888/notify \
 
 Service identity:
 
-- LaunchAgent label: `com.atlas.voicesystem`
-- Plist: `~/Library/LaunchAgents/com.atlas.voicesystem.plist`
-- Log: `~/Library/Logs/atlas-voicesystem.log`
+- LaunchAgent label: `com.echo`
+- Plist: `~/Library/LaunchAgents/com.echo.plist`
+- Log: `~/Library/Logs/echo.log`
 
-The installer unloads and quarantines the old `com.pai.voice-server` plist if found. Do not
-resurrect the old service.
+The installer unloads and quarantines the legacy `com.pai.voice-server` and
+`com.atlas.voicesystem` plists if found (a reinstall migrates a running legacy service onto
+`com.echo`). Do not resurrect the old services.
 
 ## Development workflow
 
@@ -47,11 +48,11 @@ resurrect the old service.
 git checkout dev
 bun test
 PORT=8889 tests/smoke-core.sh
-bun build adapters/pi/index.ts --target=bun --external @earendil-works/pi-coding-agent --outdir /tmp/atlas-pi-adapter-build
+bun build adapters/pi/index.ts --target=bun --external @earendil-works/pi-coding-agent --outdir /tmp/echo-pi-build
 ```
 
-After changing `core/server.ts`, restart: `launchctl kickstart -k "gui/$UID/com.atlas.voicesystem"`
-(tail `~/Library/Logs/atlas-voicesystem.log`). Use **Bun only** — no npm/npx/node. Run
+After changing `core/server.ts`, restart: `launchctl kickstart -k "gui/$UID/com.echo"`
+(tail `~/Library/Logs/echo.log`). Use **Bun only** — no npm/npx/node. Run
 `bun test` + the smoke + the Pi build before shipping.
 
 ## Release & versioning

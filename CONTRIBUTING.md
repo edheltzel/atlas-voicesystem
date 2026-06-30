@@ -2,7 +2,7 @@
 
 ## Welcome
 
-`atlas-echo` is a universal text-to-speech notification server plus optional host adapters. Contributions should make that boundary clearer, safer, or easier to install.
+`echo` is a universal text-to-speech notification server plus optional host adapters. Contributions should make that boundary clearer, safer, or easier to install.
 
 ## Code Style
 

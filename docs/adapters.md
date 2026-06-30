@@ -25,7 +25,7 @@ older runtimes) telling the model to end each response with `🗣️ <Name>: <8�
 summary>`. The existing `message_end`/`turn_end` path then extracts and speaks that line — so
 Pi speaks per-turn completions like the Claude Code path, not just the startup greeting.
 
-- **Persona name** comes from config: `personaName` ← env `ATLAS_VOICE_PERSONA_NAME` (default
+- **Persona name** comes from config: `personaName` ← env `ECHO_VOICE_PERSONA_NAME` (default
   `"Atlas"`), never hard-coded.
 - Injection is gated on `config.speakCompletions` (default on) **and** the same
   `shouldSuppressVoice` check the speak side uses (headless/subagent stays silent).

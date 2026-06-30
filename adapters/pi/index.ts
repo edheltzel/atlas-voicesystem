@@ -22,7 +22,7 @@ function sessionStartIsUserVisible(event: unknown): boolean {
 
 function logAdapterWarning(message: string, error?: unknown): void {
   const suffix = error ? `: ${error instanceof Error ? error.message : String(error)}` : "";
-  console.error(`[atlas-echo/pi] ${message}${suffix}`);
+  console.error(`[echo/pi] ${message}${suffix}`);
 }
 
 function eventMessage(event: unknown): unknown {
@@ -140,7 +140,7 @@ export default function atlasVoicePiAdapter(pi: ExtensionAPI): void {
   });
 
   pi.registerCommand("voice-status", {
-    description: "Show atlas-echo Pi adapter status",
+    description: "Show echo Pi adapter status",
     handler: async (_args, ctx) => {
       const state = [
         `endpoint: ${config.endpoint}`,

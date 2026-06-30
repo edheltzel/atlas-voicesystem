@@ -19,16 +19,19 @@ function booleanEnv(value: string | undefined, fallback: boolean): boolean {
 }
 
 export function loadPiVoiceConfig(env: Record<string, string | undefined> = process.env): PiVoiceConfig {
+  // Canonical ECHO_* names are read first; the legacy ATLAS_VOICE_* / VOICESYSTEM_*
+  // names remain as silent, deprecated fallbacks (see README "Deprecated environment
+  // variables"). NOTIFY_URL and VOICE_ID converge two legacy names onto one canonical.
   return {
-    endpoint: env.ATLAS_VOICE_NOTIFY_URL || env.VOICESYSTEM_NOTIFY_URL || "http://localhost:8888/notify",
-    title: env.ATLAS_VOICE_TITLE || "Pi Notification",
-    catchphrase: env.ATLAS_VOICE_CATCHPHRASE || "Pi session ready.",
-    personaName: env.ATLAS_VOICE_PERSONA_NAME || "Atlas",
-    voiceId: env.ATLAS_VOICE_ID || env.VOICESYSTEM_VOICE_ID || undefined,
-    voiceEnabled: booleanEnv(env.ATLAS_VOICE_ENABLED, true),
-    greetOnSessionStart: booleanEnv(env.ATLAS_VOICE_GREET_ON_START, true),
-    speakCompletions: booleanEnv(env.ATLAS_VOICE_SPEAK_COMPLETIONS, true),
-    suppressInSubagents: booleanEnv(env.ATLAS_VOICE_SUPPRESS_SUBAGENTS, true),
+    endpoint: env.ECHO_NOTIFY_URL ?? env.ATLAS_VOICE_NOTIFY_URL ?? env.VOICESYSTEM_NOTIFY_URL ?? "http://localhost:8888/notify",
+    title: env.ECHO_VOICE_TITLE ?? env.ATLAS_VOICE_TITLE ?? "Pi Notification",
+    catchphrase: env.ECHO_VOICE_CATCHPHRASE ?? env.ATLAS_VOICE_CATCHPHRASE ?? "Pi session ready.",
+    personaName: env.ECHO_VOICE_PERSONA_NAME ?? env.ATLAS_VOICE_PERSONA_NAME ?? "Atlas",
+    voiceId: env.ECHO_VOICE_ID ?? env.ATLAS_VOICE_ID ?? env.VOICESYSTEM_VOICE_ID ?? undefined,
+    voiceEnabled: booleanEnv(env.ECHO_VOICE_ENABLED ?? env.ATLAS_VOICE_ENABLED, true),
+    greetOnSessionStart: booleanEnv(env.ECHO_VOICE_GREET_ON_START ?? env.ATLAS_VOICE_GREET_ON_START, true),
+    speakCompletions: booleanEnv(env.ECHO_VOICE_SPEAK_COMPLETIONS ?? env.ATLAS_VOICE_SPEAK_COMPLETIONS, true),
+    suppressInSubagents: booleanEnv(env.ECHO_VOICE_SUPPRESS_SUBAGENTS ?? env.ATLAS_VOICE_SUPPRESS_SUBAGENTS, true),
   };
 }
 
@@ -42,7 +45,7 @@ export function shouldSuppressVoice(
   ctx: RunContext = {},
   env: Record<string, string | undefined> = process.env,
 ): boolean {
-  if (booleanEnv(env.ATLAS_VOICE_SUPPRESS, false)) return true;
+  if (booleanEnv(env.ECHO_VOICE_SUPPRESS ?? env.ATLAS_VOICE_SUPPRESS, false)) return true;
   // Pi spawns subagents as a child `pi --mode json -p --no-session`. Those headless
   // run modes have no user-facing UI (ctx.hasUI === false), so to avoid an audio
   // flood we speak only when a real UI is present. `tui` and `rpc` keep their UI.

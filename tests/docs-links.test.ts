@@ -21,7 +21,7 @@ describe("documentation links", () => {
   test("agent guide points at the neutral service and current core paths", () => {
     const guide = readFileSync("AGENTS.md", "utf8");
     expect(guide).toContain("core/server.ts");
-    expect(guide).toContain("com.atlas.voicesystem");
+    expect(guide).toContain("com.echo");
     expect(guide).not.toContain("Canonical server source | `claudecode/.claude/PAI/USER/Voice/server.ts`");
     expect(guide).not.toContain("POST /pai");
     expect(guide).not.toContain("pai-voice-server.log");

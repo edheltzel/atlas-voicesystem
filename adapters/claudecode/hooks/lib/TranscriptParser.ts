@@ -5,7 +5,7 @@
  * Shared library for extracting content from Claude Code transcript files.
  * Used by Stop hooks for voice, tab state, and response capture.
  *
- * Vendored into the Claude Code adapter (atlas-echo) so the adapter owns
+ * Vendored into the Claude Code adapter (echo) so the adapter owns
  * its Stop-hook pipeline end-to-end. Host-specific transcript logic — must not
  * live in core/. The only change from the upstream copy is the identity import
  * path (repo-local ./identity instead of the live ~/.claude tree).

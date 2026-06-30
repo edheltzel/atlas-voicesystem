@@ -1,20 +1,22 @@
 #!/bin/bash
 set -euo pipefail
 
-SERVICE_NAME="com.atlas.voicesystem"
-LEGACY_SERVICE_NAME="com.pai.voice-server"
+SERVICE_NAME="com.echo"
+# Former labels for this service. A reinstall unloads + quarantines each so a
+# running legacy service migrates cleanly onto com.echo. com.pai.voice-server is
+# the original PAI-named service; com.atlas.voicesystem is the prior "Atlas" name.
+LEGACY_SERVICE_NAMES=("com.pai.voice-server" "com.atlas.voicesystem")
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 PLIST_PATH="$HOME/Library/LaunchAgents/${SERVICE_NAME}.plist"
-LEGACY_PLIST_PATH="$HOME/Library/LaunchAgents/${LEGACY_SERVICE_NAME}.plist"
-LOG_PATH="$HOME/Library/Logs/atlas-voicesystem.log"
+LOG_PATH="$HOME/Library/Logs/echo.log"
 ADAPTER="none"
 
 usage() {
   cat <<EOF
 Usage: scripts/install.sh [--adapter none|claudecode|pi]
 
-Installs the universal atlas-echo core as a macOS LaunchAgent.
+Installs the universal echo core as a macOS LaunchAgent.
 Adapter registration is optional and runs only after adapter preflight passes.
 EOF
 }
@@ -120,23 +122,27 @@ EOF
 }
 
 migrate_legacy_service() {
-  if is_loaded "$LEGACY_SERVICE_NAME"; then
-    echo "> Unloading legacy PAI-named voice service ($LEGACY_SERVICE_NAME)"
-    launchctl unload "$LEGACY_PLIST_PATH" 2>/dev/null || true
-    sleep 1
-    if is_loaded "$LEGACY_SERVICE_NAME"; then
-      echo "Legacy service is still loaded after unload: $LEGACY_SERVICE_NAME" >&2
-      exit 1
-    fi
-  fi
+  for legacy in "${LEGACY_SERVICE_NAMES[@]}"; do
+    local legacy_plist="$HOME/Library/LaunchAgents/${legacy}.plist"
 
-  if [ -f "$LEGACY_PLIST_PATH" ]; then
-    local stamp backup
-    stamp="$(date +%Y%m%d%H%M%S)"
-    backup="${LEGACY_PLIST_PATH}.migrated-${stamp}"
-    echo "> Quarantining legacy LaunchAgent plist: $backup"
-    mv "$LEGACY_PLIST_PATH" "$backup"
-  fi
+    if is_loaded "$legacy"; then
+      echo "> Unloading legacy voice service ($legacy)"
+      launchctl unload "$legacy_plist" 2>/dev/null || true
+      sleep 1
+      if is_loaded "$legacy"; then
+        echo "Legacy service is still loaded after unload: $legacy" >&2
+        exit 1
+      fi
+    fi
+
+    if [ -f "$legacy_plist" ]; then
+      local stamp backup
+      stamp="$(date +%Y%m%d%H%M%S)"
+      backup="${legacy_plist}.migrated-${stamp}"
+      echo "> Quarantining legacy LaunchAgent plist: $backup"
+      mv "$legacy_plist" "$backup"
+    fi
+  done
 }
 
 reload_core_service() {
@@ -154,13 +160,15 @@ reload_core_service() {
     exit 1
   fi
 
-  if is_loaded "$LEGACY_SERVICE_NAME"; then
-    echo "Legacy service unexpectedly loaded after migration: $LEGACY_SERVICE_NAME" >&2
-    exit 1
-  fi
+  for legacy in "${LEGACY_SERVICE_NAMES[@]}"; do
+    if is_loaded "$legacy"; then
+      echo "Legacy service unexpectedly loaded after migration: $legacy" >&2
+      exit 1
+    fi
+  done
 
   if curl --connect-timeout 2 --max-time 5 -fsS http://localhost:8888/health >/dev/null 2>&1; then
-    echo "OK atlas-echo is healthy on :8888"
+    echo "OK echo is healthy on :8888"
   else
     echo "Voice server did not respond. Check logs: $LOG_PATH" >&2
     exit 1

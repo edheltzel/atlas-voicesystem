@@ -1,4 +1,4 @@
-# ARCHITECTURE — atlas-echo
+# ARCHITECTURE — echo
 
 A codemap for agents. Start here to learn *where* things live and *what invariants*
 to respect; drill into [`AGENTS.md`](AGENTS.md) for commands and the [`docs/`](docs/)
@@ -6,7 +6,7 @@ pages for per-area detail.
 
 ## Bird's-eye view
 
-atlas-echo is a Bun/TypeScript text-to-speech notification daemon built as a
+echo is a Bun/TypeScript text-to-speech notification daemon built as a
 **host-neutral core plus out-of-process host adapters**. One long-lived process
 (`core/server.ts`) listens on `localhost:8888` and exposes three HTTP endpoints
 (`POST /notify`, `POST /notify/personality`, `GET /health`). Any host — a Claude Code
@@ -105,7 +105,7 @@ Voice config and the per-turn persona voice: [`docs/voices.md`](docs/voices.md).
 
 ### Circuit breaker (`core/circuit-breaker.ts`)
 Tracks **provider** (synthesis/network) failures per TTS provider, opening after a shared
-threshold (default **2**, floor 1; env `VOICESYSTEM_CIRCUIT_BREAKER_THRESHOLD`) and
+threshold (default **2**, floor 1; env `ECHO_CIRCUIT_BREAKER_THRESHOLD`) and
 skipping that provider for a 60s cooldown before half-opening to retest. The attribution
 rule is load-bearing: a **local playback** failure (afplay/mpv) is *not* a provider failure
 and never opens the breaker — `EdgeTTSProvider.speak` splits online synthesis (governed,
@@ -145,7 +145,7 @@ to Atlas automatically. Full mechanism: [`docs/voices.md`](docs/voices.md).
 Both adapters are **fully out-of-process**, import nothing from `core/`, and speak only the
 HTTP `/notify` contract. They are independent (no shared code): the Claude Code adapter suppresses subagents via
 stdin `agent_id` and reads `~/.claude/settings.json` for identity; Pi suppresses via the
-`ATLAS_VOICE_SUPPRESS` env flag plus run-context (headless modes — `hasUI === false`, or
+`ECHO_VOICE_SUPPRESS` env flag plus run-context (headless modes — `hasUI === false`, or
 `mode` `json`/`print`) and is configured env-only (`shouldSuppressVoice` / `loadPiVoiceConfig`
 in `adapters/pi/config.ts`). The only thing they agree on is the `/notify` wire shape. Adapter responsibilities and the Pi per-turn injection (#15): [`docs/adapters.md`](docs/adapters.md).
 

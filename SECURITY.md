@@ -1,6 +1,6 @@
 # Security Model
 
-atlas-echo is a **local-only** TTS notification daemon. It is not a public service:
+echo is a **local-only** TTS notification daemon. It is not a public service:
 its threat model is "a process on this machine POSTs text to be spoken." This doc describes
 the trust boundary, egress posture, and secret handling. For the request flow see
 [`ARCHITECTURE.md`](ARCHITECTURE.md); for egress detail see
@@ -47,19 +47,20 @@ network exposure without revisiting it.
   runtime (`resolveEnvVar`, falling back to `process.env.ELEVENLABS_API_KEY`). The key is
   read once in the provider constructor — `/health` reports only `apiKeyConfigured: true|false`,
   never the key itself.
-- **Env files load from user-owned paths** (`VOICESYSTEM_ENV_PATHS`,
-  `~/.config/atlas-voicesystem/.env`, …), first-found-wins, never overriding an
-  already-set `process.env` value.
+- **Env files load from user-owned paths** (`ECHO_ENV_PATHS`,
+  `~/.config/echo/.env`, …), first-found-wins, never overriding an
+  already-set `process.env` value. (Legacy `VOICESYSTEM_ENV_PATHS` is still
+  honored as a deprecated silent fallback — see the README.)
 
 ## User-owned paths — never `/tmp`
 
 Process state must live under user-owned cache/log/config paths, never `/tmp`:
 
-- **Audio temp files:** `AUDIO_CACHE_DIR` (default `~/Library/Caches/atlas-voicesystem/audio`
+- **Audio temp files:** `AUDIO_CACHE_DIR` (default `~/Library/Caches/echo/audio`
   on macOS, else `$XDG_CACHE_HOME`/`~/.cache`), created with `mkdirSync(..., { mode: 0o700 })`
   and per-render `mkdtempSync` subdirectories.
-- **Logs:** `~/Library/Logs/atlas-voicesystem.log` (human) and the separate
-  `~/Library/Logs/atlas-voicesystem/voice-resolution.jsonl` (drop-off log), or `$XDG_STATE_HOME`/
+- **Logs:** `~/Library/Logs/echo.log` (human) and the separate
+  `~/Library/Logs/echo/voice-resolution.jsonl` (drop-off log), or `$XDG_STATE_HOME`/
   `~/.local/state` off macOS.
 
 This is an invariant (see [`AGENTS.md`](AGENTS.md)): **do not write process state to `/tmp`.**

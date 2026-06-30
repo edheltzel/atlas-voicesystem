@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-// Idempotently re-applies atlas-echo's Claude Code settings.json hook registrations.
+// Idempotently re-applies echo's Claude Code settings.json hook registrations.
 // Safe to run repeatedly. Backs up settings.json before mutating.
 
 import { chmodSync, copyFileSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";

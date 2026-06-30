@@ -1,6 +1,6 @@
 ![Echo — a voice for any agent](assets/banner.png)
 
-# atlas-echo
+# echo
 
 Standalone, multi-provider TTS notification server for coding agents, terminals, and scripts.
 
@@ -77,7 +77,7 @@ Manual speak request:
 ```bash
 curl -X POST http://localhost:8888/notify \
   -H 'Content-Type: application/json' \
-  -d '{"message":"Hello from atlas echo"}'
+  -d '{"message":"Hello from echo"}'
 ```
 
 Silent smoke request:
@@ -126,10 +126,10 @@ Each provider entry includes an egress audit — `enabled`, `healthy`, and `woul
 
 ### Voice-resolution drop-off log
 
-To make it observable *why* a `/notify` used the voice it did, the daemon appends **one structured JSONL event per voice-enabled `/notify`** to a machine-readable log — separate from the human-readable daemon log (`~/Library/Logs/atlas-voicesystem.log`).
+To make it observable *why* a `/notify` used the voice it did, the daemon appends **one structured JSONL event per voice-enabled `/notify`** to a machine-readable log — separate from the human-readable daemon log (`~/Library/Logs/echo.log`).
 
-- **Path:** `~/Library/Logs/atlas-voicesystem/voice-resolution.jsonl` on macOS (else `$XDG_STATE_HOME` or `~/.local/state` under `atlas-voicesystem/`). Override with `VOICESYSTEM_RESOLUTION_LOG`.
-- **Retention:** single size-capped file (`~1MB`, override `VOICESYSTEM_RESOLUTION_LOG_MAX_BYTES`). On each write, oldest whole lines are pruned to stay under the cap (newest always kept) — no logrotate, no time-based rotation.
+- **Path:** `~/Library/Logs/echo/voice-resolution.jsonl` on macOS (else `$XDG_STATE_HOME` or `~/.local/state` under `echo/`). Override with `ECHO_RESOLUTION_LOG`.
+- **Retention:** single size-capped file (`~1MB`, override `ECHO_RESOLUTION_LOG_MAX_BYTES`). On each write, oldest whole lines are pruned to stay under the cap (newest always kept) — no logrotate, no time-based rotation.
 - **Best-effort:** a write failure is swallowed and never breaks a notification.
 
 Each line:
@@ -178,7 +178,7 @@ For the default `edge-tts` provider, each agent maps to a Microsoft neural voice
 2. Edit that agent's `edgetts.voice` (and optional `speed`) in `core/voices.json`.
 3. Reload the daemon so it re-reads the config:
    ```bash
-   launchctl kickstart -k "gui/$UID/com.atlas.voicesystem"
+   launchctl kickstart -k "gui/$UID/com.echo"
    ```
 4. Verify: `curl -fsS -X POST http://localhost:8888/notify -H 'Content-Type: application/json' -d '{"message":"voice check","voice_id":"<key>","voice_enabled":true}'`.
 
@@ -216,6 +216,64 @@ bun scripts/preview-voices.ts --dry-run --voices en-GB-RyanNeural   # print synt
 | `--text` | Sample line spoken (`{voice}` is substituted) | `Hi, I'm {voice}. This is how I sound for Atlas.` |
 | `--rate` | edge-tts rate applied to every sample | `+0%` |
 | `--list` / `--dry-run` | Print matched voices (and synth command) without playing audio | off |
+
+## Deprecated environment variables
+
+Echo reads its configuration from `ECHO_*` environment variables. The project's
+former names — `ATLAS_VOICE_*` (Pi adapter) and `VOICESYSTEM_*` (core) — **still
+work as silent fallbacks**, so nothing breaks on upgrade, but they are
+**deprecated** and slated for removal in a future major release.
+
+**Read order:** the canonical `ECHO_*` name is read first; if it is unset, the
+legacy name(s) are consulted in order. Two settings converge two old names onto a
+single canonical name (priority `ECHO_*` → `ATLAS_VOICE_*` → `VOICESYSTEM_*`).
+
+| Old name | New canonical | Notes |
+|---|---|---|
+| `ATLAS_VOICE_NOTIFY_URL` | `ECHO_NOTIFY_URL` | **convergence** (with `VOICESYSTEM_NOTIFY_URL`) |
+| `VOICESYSTEM_NOTIFY_URL` | `ECHO_NOTIFY_URL` | **convergence** (lowest priority) |
+| `ATLAS_VOICE_ID` | `ECHO_VOICE_ID` | **convergence** (with `VOICESYSTEM_VOICE_ID`) |
+| `VOICESYSTEM_VOICE_ID` | `ECHO_VOICE_ID` | **convergence** (lowest priority) |
+| `ATLAS_VOICE_TITLE` | `ECHO_VOICE_TITLE` | |
+| `ATLAS_VOICE_CATCHPHRASE` | `ECHO_VOICE_CATCHPHRASE` | |
+| `ATLAS_VOICE_PERSONA_NAME` | `ECHO_VOICE_PERSONA_NAME` | default value is still `Atlas` |
+| `ATLAS_VOICE_ENABLED` | `ECHO_VOICE_ENABLED` | |
+| `ATLAS_VOICE_GREET_ON_START` | `ECHO_VOICE_GREET_ON_START` | |
+| `ATLAS_VOICE_SPEAK_COMPLETIONS` | `ECHO_VOICE_SPEAK_COMPLETIONS` | |
+| `ATLAS_VOICE_SUPPRESS_SUBAGENTS` | `ECHO_VOICE_SUPPRESS_SUBAGENTS` | |
+| `ATLAS_VOICE_SUPPRESS` | `ECHO_VOICE_SUPPRESS` | |
+| `VOICESYSTEM_ENV_PATHS` | `ECHO_ENV_PATHS` | |
+| `VOICESYSTEM_DEFAULT_TITLE` | `ECHO_DEFAULT_TITLE` | |
+| `VOICESYSTEM_AUDIO_PROCESS_TIMEOUT_MS` | `ECHO_AUDIO_PROCESS_TIMEOUT_MS` | |
+| `VOICESYSTEM_NOTIFICATION_PROCESS_TIMEOUT_MS` | `ECHO_NOTIFICATION_PROCESS_TIMEOUT_MS` | |
+| `VOICESYSTEM_AUDIO_CACHE_DIR` | `ECHO_AUDIO_CACHE_DIR` | |
+| `VOICESYSTEM_EDGETTS_TIMEOUT_MS` | `ECHO_EDGETTS_TIMEOUT_MS` | |
+| `VOICESYSTEM_EDGETTS_SYNTH_RETRIES` | `ECHO_EDGETTS_SYNTH_RETRIES` | |
+| `VOICESYSTEM_EDGETTS_SYNTH_BACKOFF_MS` | `ECHO_EDGETTS_SYNTH_BACKOFF_MS` | |
+| `VOICESYSTEM_RESOLUTION_LOG` | `ECHO_RESOLUTION_LOG` | |
+| `VOICESYSTEM_RESOLUTION_LOG_MAX_BYTES` | `ECHO_RESOLUTION_LOG_MAX_BYTES` | |
+| `VOICESYSTEM_CIRCUIT_BREAKER_THRESHOLD` | `ECHO_CIRCUIT_BREAKER_THRESHOLD` | |
+
+### Migrating
+
+**Human:** search your shell profile, `~/.config/echo/.env`, and your LaunchAgent
+plist for the old names and replace each per the table above, then restart the
+daemon:
+
+```bash
+rg -l 'ATLAS_VOICE_|VOICESYSTEM_' ~/.zshrc ~/.bashrc ~/.config/echo/.env 2>/dev/null
+bash scripts/restart.sh
+```
+
+**Agent:** run `rg -l 'ATLAS_VOICE_|VOICESYSTEM_'` across your config locations,
+rewrite each match to its `ECHO_*` canonical per the table (collapsing the two
+convergence pairs onto `ECHO_NOTIFY_URL` / `ECHO_VOICE_ID`), then restart the
+daemon with `bash scripts/restart.sh`.
+
+> Filesystem default paths also moved (`…/atlas-voicesystem/…` → `…/echo/…`) and
+> the LaunchAgent label changed (`com.atlas.voicesystem` → `com.echo`). A
+> reinstall (`bash scripts/install.sh`) migrates the running service
+> automatically — see the [CHANGELOG](CHANGELOG.md).
 
 ## Development
 

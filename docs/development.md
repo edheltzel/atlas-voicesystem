@@ -31,7 +31,7 @@ curl -fsS -X POST http://localhost:8889/notify \
 Adapters should expose endpoint configuration. For Pi, set:
 
 ```bash
-ATLAS_VOICE_NOTIFY_URL=http://localhost:8889/notify pi
+ECHO_NOTIFY_URL=http://localhost:8889/notify pi
 ```
 
 ## Hot Reload

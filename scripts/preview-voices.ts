@@ -18,10 +18,11 @@ const PYTHON3_PATH = process.env.PYTHON3_PATH || "/opt/homebrew/bin/python3";
 const DEFAULT_LOCALES = ["en-US", "en-GB", "en-AU", "en-IE"];
 const DEFAULT_TEXT = "Hi, I'm {voice}. This is how I sound for Atlas.";
 const CACHE_DIR =
-  process.env.VOICESYSTEM_AUDIO_CACHE_DIR ||
+  process.env.ECHO_AUDIO_CACHE_DIR ??
+  process.env.VOICESYSTEM_AUDIO_CACHE_DIR ??
   (process.platform === "darwin"
-    ? join(homedir(), "Library", "Caches", "atlas-voicesystem", "audio")
-    : join(process.env.XDG_CACHE_HOME || join(homedir(), ".cache"), "atlas-voicesystem", "audio"));
+    ? join(homedir(), "Library", "Caches", "echo", "audio")
+    : join(process.env.XDG_CACHE_HOME || join(homedir(), ".cache"), "echo", "audio"));
 
 export interface EdgeVoice {
   name: string;

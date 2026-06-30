@@ -21,10 +21,13 @@ missing/non-numeric/below-floor values:
 
 | Env var | Default | Floor |
 |---|---|---|
-| `VOICESYSTEM_CIRCUIT_BREAKER_THRESHOLD` | 2 | 1 |
-| `VOICESYSTEM_EDGETTS_TIMEOUT_MS` | 15000 | 1 |
-| `VOICESYSTEM_EDGETTS_SYNTH_RETRIES` | 1 | 0 |
-| `VOICESYSTEM_EDGETTS_SYNTH_BACKOFF_MS` | 250 | 1 |
+| `ECHO_CIRCUIT_BREAKER_THRESHOLD` | 2 | 1 |
+| `ECHO_EDGETTS_TIMEOUT_MS` | 15000 | 1 |
+| `ECHO_EDGETTS_SYNTH_RETRIES` | 1 | 0 |
+| `ECHO_EDGETTS_SYNTH_BACKOFF_MS` | 250 | 1 |
+
+The legacy `VOICESYSTEM_*` names for these knobs still work as deprecated silent
+fallbacks (see the root README's "Deprecated environment variables").
 
 The threshold is **global** across edgetts/elevenlabs/kokoro (default 2 tolerates one
 isolated post-retry failure; a second consecutive failure still opens the breaker, so
