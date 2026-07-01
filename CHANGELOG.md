@@ -7,6 +7,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-07-01
+
+Renamed the project **Atlas Voicesystem → Echo** (Ed's call — "Atlas" is personal). A full
+de-brand across the brand/display name, the GitHub repo slug (`edheltzel/echo`), package names
+(`echo`, `@echo/pi-adapter`), default filesystem paths, the LaunchAgent label, and the
+environment-variable knobs. The persona-name default (`Atlas`) is unchanged.
+
+**Versioning note:** the Breaking items below change the install contract (LaunchAgent label and
+default filesystem paths) and would normally warrant a major bump; they ship under a patch bump
+(0.3.0 → 0.3.1) by maintainer decision, since the installer migrates a running service
+automatically and no released consumer depends on the old label or paths.
+
+### Breaking
+
+- **LaunchAgent label** renamed `com.atlas.voicesystem` → `com.echo` (plist
+  `~/Library/LaunchAgents/com.echo.plist`). A reinstall (`bash scripts/install.sh`) migrates
+  automatically: the installer now unloads and quarantines a running `com.atlas.voicesystem`
+  (alongside the existing `com.pai.voice-server` handling) before loading `com.echo`.
+- **Default filesystem paths** moved from `…/atlas-voicesystem/…` → `…/echo/…`: log
+  `~/Library/Logs/echo.log`, config dir `~/.config/echo/.env`, audio cache
+  `~/Library/Caches/echo/audio`, drop-off log `~/Library/Logs/echo/voice-resolution.jsonl`.
+  Old logs/config/cache are orphaned (harmless) — copy them over if you want history.
+
+### Changed
+
+- Project renamed **Atlas Voicesystem → Echo** across all brand/display text, the GitHub repo
+  slug (`edheltzel/atlas-voicesystem` → `edheltzel/echo`), and package names (root `echo`,
+  Pi adapter `@echo/pi-adapter`).
+
+### Deprecated
+
+- Environment-variable knobs renamed to a `ECHO_*` canonical scheme. The former `ATLAS_VOICE_*`
+  (Pi adapter) and `VOICESYSTEM_*` (core) names **still work as silent fallbacks** but are
+  deprecated and slated for removal in a future major. The canonical name is read first; old
+  names are the fallback. See the README's **"Deprecated environment variables"** section for the
+  full old→new mapping (23 names, two convergences) and migration directions.
+
 ## [0.3.0] - 2026-06-29
 
 Rename the Claude Code adapter and neutralize the public PAI surface (#59). `core/` was already
@@ -95,8 +132,9 @@ Initial release of the universal voice-system core plus PAI and Pi host adapters
 
 - Behavioral edge-tts synth/playback attribution test (#38); egress-gating, circuit-breaker, env-parsing, and persona-resolution coverage.
 
-[Unreleased]: https://github.com/edheltzel/atlas-voicesystem/compare/v0.3.0...HEAD
-[0.3.0]: https://github.com/edheltzel/atlas-voicesystem/compare/v0.2.0...v0.3.0
-[0.2.0]: https://github.com/edheltzel/atlas-voicesystem/compare/v0.1.1...v0.2.0
-[0.1.1]: https://github.com/edheltzel/atlas-voicesystem/releases/tag/v0.1.1
-[0.1.0]: https://github.com/edheltzel/atlas-voicesystem/releases/tag/v0.1.0
+[Unreleased]: https://github.com/edheltzel/echo/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/edheltzel/echo/compare/v0.3.0...v0.3.1
+[0.3.0]: https://github.com/edheltzel/echo/compare/v0.2.0...v0.3.0
+[0.2.0]: https://github.com/edheltzel/echo/compare/v0.1.1...v0.2.0
+[0.1.1]: https://github.com/edheltzel/echo/releases/tag/v0.1.1
+[0.1.0]: https://github.com/edheltzel/echo/releases/tag/v0.1.0

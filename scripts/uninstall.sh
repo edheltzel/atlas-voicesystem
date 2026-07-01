@@ -1,8 +1,8 @@
 #!/bin/bash
 set -euo pipefail
-SERVICE_NAME="com.atlas.voicesystem"
+SERVICE_NAME="com.echo"
 PLIST_PATH="$HOME/Library/LaunchAgents/${SERVICE_NAME}.plist"
-LOG_PATH="$HOME/Library/Logs/atlas-voicesystem.log"
+LOG_PATH="$HOME/Library/Logs/echo.log"
 
 if launchctl list 2>/dev/null | grep "$SERVICE_NAME" >/dev/null 2>&1; then
   launchctl unload "$PLIST_PATH" 2>/dev/null || true

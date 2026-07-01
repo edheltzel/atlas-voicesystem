@@ -27,9 +27,9 @@
 //   • AUDIO_CACHE_DIR=<tmp>       → real createAudioTempFile() writes land in a
 //                                   scratch dir, not the user's real cache.
 process.env.PORT = "0";
-process.env.VOICESYSTEM_CIRCUIT_BREAKER_THRESHOLD = "2";
-process.env.VOICESYSTEM_EDGETTS_SYNTH_RETRIES = "1";
-process.env.VOICESYSTEM_EDGETTS_SYNTH_BACKOFF_MS = "1";
+process.env.ECHO_CIRCUIT_BREAKER_THRESHOLD = "2";
+process.env.ECHO_EDGETTS_SYNTH_RETRIES = "1";
+process.env.ECHO_EDGETTS_SYNTH_BACKOFF_MS = "1";
 
 import { afterAll, afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import { EventEmitter } from "node:events";
@@ -39,8 +39,8 @@ import { mkdtempSync, rmSync } from "node:fs";
 import * as realChildProcess from "node:child_process";
 import { circuitBreakers, CIRCUIT_BREAKER_THRESHOLD } from "../../core/circuit-breaker.ts";
 
-const AUDIO_SCRATCH = mkdtempSync(join(tmpdir(), "atlas-vs-edgetts-attr-"));
-process.env.VOICESYSTEM_AUDIO_CACHE_DIR = AUDIO_SCRATCH;
+const AUDIO_SCRATCH = mkdtempSync(join(tmpdir(), "echo-edgetts-attr-"));
+process.env.ECHO_AUDIO_CACHE_DIR = AUDIO_SCRATCH;
 
 // --- spawn seam (edge-tts synth + playback are both subprocesses) -----------
 // Capture the real spawn, then route the module's `spawn` through a swappable

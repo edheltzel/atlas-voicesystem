@@ -44,9 +44,10 @@ function assistantEvent(id: string, line = "Tests passed.") {
 
 beforeEach(() => {
   process.env = { ...originalEnv };
+  delete process.env.ECHO_VOICE_SUPPRESS;
   delete process.env.ATLAS_VOICE_SUPPRESS;
-  process.env.ATLAS_VOICE_NOTIFY_URL = "http://voice.example/notify";
-  process.env.ATLAS_VOICE_CATCHPHRASE = "Pi session ready.";
+  process.env.ECHO_NOTIFY_URL = "http://voice.example/notify";
+  process.env.ECHO_VOICE_CATCHPHRASE = "Pi session ready.";
   Date.now = originalDateNow;
 });
 
@@ -155,7 +156,7 @@ describe("Pi adapter lifecycle", () => {
   });
 
   test("before_agent_start uses the configured persona name", async () => {
-    process.env.ATLAS_VOICE_PERSONA_NAME = "Themis";
+    process.env.ECHO_VOICE_PERSONA_NAME = "Themis";
     const { api, handlers } = createMockPi();
     atlasVoicePiAdapter(api as any);
 
@@ -182,7 +183,7 @@ describe("Pi adapter lifecycle", () => {
   });
 
   test("before_agent_start does not inject when completions are disabled", async () => {
-    process.env.ATLAS_VOICE_SPEAK_COMPLETIONS = "off";
+    process.env.ECHO_VOICE_SPEAK_COMPLETIONS = "off";
     const { api, handlers } = createMockPi();
     atlasVoicePiAdapter(api as any);
 

@@ -12,7 +12,7 @@ name key, (2) any `elevenlabs.voice_id`, (3) `identity`, else the active provide
 Callers send the **name key** (e.g. `"themis"`), not a raw provider voice id.
 
 **Change a voice:** edit that agent's `edgetts.voice`/`speed`, then reload the daemon
-(`launchctl kickstart -k "gui/$UID/com.atlas.voicesystem"`). Audition first with
+(`launchctl kickstart -k "gui/$UID/com.echo"`). Audition first with
 `bun scripts/preview-voices.ts --list` / `--locale`.
 
 **Add a voice/persona:** add a keyed entry (mirror an existing one; validate the voice name

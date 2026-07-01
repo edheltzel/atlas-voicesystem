@@ -1,6 +1,6 @@
 {
-  "name": "atlas-echo",
-  "version": "0.3.0",
+  "name": "echo",
+  "version": "0.3.1",
   "private": true,
   "type": "module"
 }

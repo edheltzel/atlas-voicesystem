@@ -1,8 +1,8 @@
 #!/bin/bash
 set -euo pipefail
-SERVICE_NAME="com.atlas.voicesystem"
+SERVICE_NAME="com.echo"
 PLIST_PATH="$HOME/Library/LaunchAgents/${SERVICE_NAME}.plist"
-LOG_PATH="$HOME/Library/Logs/atlas-voicesystem.log"
+LOG_PATH="$HOME/Library/Logs/echo.log"
 
 if [ ! -f "$PLIST_PATH" ]; then
   echo "Service not installed. Run scripts/install.sh first." >&2
@@ -17,7 +17,7 @@ fi
 launchctl load "$PLIST_PATH"
 sleep 2
 if curl --connect-timeout 2 --max-time 5 -fsS http://localhost:8888/health >/dev/null 2>&1; then
-  echo "OK atlas-echo started on :8888"
+  echo "OK echo started on :8888"
 else
   echo "Service loaded but health check failed. Check logs: $LOG_PATH" >&2
   exit 1

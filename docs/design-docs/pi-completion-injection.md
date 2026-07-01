@@ -94,7 +94,7 @@ Pi parity = inject the same convention (step 1) and let the **existing**
 ### 4.1 Subscribe to `before_agent_start` and inject the convention — `adapters/pi/index.ts`
 
 A `before_agent_start` handler appends the voice-line instruction to `event.systemPrompt`,
-using the configured persona name (`ATLAS_VOICE_PERSONA_NAME`, default `"Atlas"`), gated on
+using the configured persona name (`ECHO_VOICE_PERSONA_NAME`, default `"Atlas"`), gated on
 `config.speakCompletions` AND `shouldSuppressVoice(...)` so headless/`--mode json` subagents
 (`hasUI === false`) neither emit the tag nor speak. Feature-detects `event.systemPrompt` and
 no-ops if absent (older runtime → degrade safely).

@@ -1,6 +1,6 @@
 # Human Install Guide
 
-This guide installs `atlas-echo`, a local voice notification server for coding agents and scripts.
+This guide installs `echo`, a local voice notification server for coding agents and scripts.
 
 ## What gets installed
 
@@ -20,7 +20,7 @@ Install Bun first. Optional voice providers and host adapters are described in `
 bash scripts/install.sh --adapter none
 ```
 
-This writes a neutral LaunchAgent (`com.atlas.voicesystem`) and starts the server on `localhost:8888`.
+This writes a neutral LaunchAgent (`com.echo`) and starts the server on `localhost:8888`.
 
 You should see a health success message. If not, open the log path printed by the script.
 
@@ -48,7 +48,7 @@ Inside Pi, `/voice-status` shows adapter configuration.
 curl -fsS http://localhost:8888/health
 curl -fsS -X POST http://localhost:8888/notify \
   -H 'Content-Type: application/json' \
-  -d '{"message":"Hello from atlas echo"}'
+  -d '{"message":"Hello from echo"}'
 ```
 
 The second command should speak aloud unless your provider chain is disabled or muted.

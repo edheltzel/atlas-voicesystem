@@ -147,10 +147,11 @@ function log(level: 'info' | 'warn' | 'error', message: string, ctx?: LogContext
 // =============================================================================
 
 // Load .env from multiple locations (first found wins for each key).
-// Adapters may provide additional colon-separated paths with VOICESYSTEM_ENV_PATHS.
+// Adapters may provide additional colon-separated paths with ECHO_ENV_PATHS
+// (legacy VOICESYSTEM_ENV_PATHS still honored as a silent fallback).
 const envPaths = [
-  ...(process.env.VOICESYSTEM_ENV_PATHS?.split(':').filter(Boolean) ?? []),
-  join(homedir(), '.config', 'atlas-voicesystem', '.env'),
+  ...((process.env.ECHO_ENV_PATHS ?? process.env.VOICESYSTEM_ENV_PATHS)?.split(':').filter(Boolean) ?? []),
+  join(homedir(), '.config', 'echo', '.env'),
   join(homedir(), '.config', 'voicesystem', '.env'),
   join(homedir(), '.env'),
 ];
@@ -179,13 +180,13 @@ const VOICES_PATH = process.env.VOICES_PATH || join(import.meta.dir, 'voices.jso
 const DEFAULT_MACOS_VOICE = 'Daniel (Enhanced)';
 const ELEVENLABS_TIMEOUT_MS = 10_000;
 const KOKORO_TIMEOUT_MS = 10_000;
-const DEFAULT_NOTIFICATION_TITLE = process.env.VOICESYSTEM_DEFAULT_TITLE || "Voice Notification";
-const AUDIO_PROCESS_TIMEOUT_MS = parseInt(process.env.VOICESYSTEM_AUDIO_PROCESS_TIMEOUT_MS || "60000");
-const NOTIFICATION_PROCESS_TIMEOUT_MS = parseInt(process.env.VOICESYSTEM_NOTIFICATION_PROCESS_TIMEOUT_MS || "10000");
-const AUDIO_CACHE_DIR = process.env.VOICESYSTEM_AUDIO_CACHE_DIR || (
+const DEFAULT_NOTIFICATION_TITLE = process.env.ECHO_DEFAULT_TITLE ?? process.env.VOICESYSTEM_DEFAULT_TITLE ?? "Voice Notification";
+const AUDIO_PROCESS_TIMEOUT_MS = parseInt(process.env.ECHO_AUDIO_PROCESS_TIMEOUT_MS ?? process.env.VOICESYSTEM_AUDIO_PROCESS_TIMEOUT_MS ?? "60000");
+const NOTIFICATION_PROCESS_TIMEOUT_MS = parseInt(process.env.ECHO_NOTIFICATION_PROCESS_TIMEOUT_MS ?? process.env.VOICESYSTEM_NOTIFICATION_PROCESS_TIMEOUT_MS ?? "10000");
+const AUDIO_CACHE_DIR = process.env.ECHO_AUDIO_CACHE_DIR ?? process.env.VOICESYSTEM_AUDIO_CACHE_DIR ?? (
   process.platform === 'darwin'
-    ? join(homedir(), 'Library', 'Caches', 'atlas-voicesystem', 'audio')
-    : join(process.env.XDG_CACHE_HOME || join(homedir(), '.cache'), 'atlas-voicesystem', 'audio')
+    ? join(homedir(), 'Library', 'Caches', 'echo', 'audio')
+    : join(process.env.XDG_CACHE_HOME || join(homedir(), '.cache'), 'echo', 'audio')
 );
 
 // Resolve environment variables in config values
@@ -546,14 +547,15 @@ function spawnSafe(command: string, args: string[], timeoutMs = NOTIFICATION_PRO
 // edge-tts is Microsoft's ONLINE WebSocket TTS, so transient synthesis blips
 // happen. Retry the synth step a bounded number of times before counting a
 // provider failure, and keep the synth timeout env-tunable (mirrors the other
-// VOICESYSTEM_*_TIMEOUT_MS knobs). Worst-case added latency is bounded by
+// ECHO_*_TIMEOUT_MS knobs). Worst-case added latency is bounded by
 // EDGETTS_SYNTH_RETRIES × (timeout + backoff).
 // Bounded parses: a NaN/negative/zero override must fall back to the default,
 // never to a degenerate value (0ms timeout = instant fail; 0 retries from NaN
 // would zero the loop → false success). retries floor 0, timeout/backoff floor 1.
-const EDGETTS_TIMEOUT_MS = parseBoundedInt(process.env.VOICESYSTEM_EDGETTS_TIMEOUT_MS, 15000, 1);
-const EDGETTS_SYNTH_RETRIES = parseBoundedInt(process.env.VOICESYSTEM_EDGETTS_SYNTH_RETRIES, 1, 0);
-const EDGETTS_SYNTH_BACKOFF_MS = parseBoundedInt(process.env.VOICESYSTEM_EDGETTS_SYNTH_BACKOFF_MS, 250, 1);
+// Canonical ECHO_* read first; legacy VOICESYSTEM_* kept as a silent fallback.
+const EDGETTS_TIMEOUT_MS = parseBoundedInt(process.env.ECHO_EDGETTS_TIMEOUT_MS ?? process.env.VOICESYSTEM_EDGETTS_TIMEOUT_MS, 15000, 1);
+const EDGETTS_SYNTH_RETRIES = parseBoundedInt(process.env.ECHO_EDGETTS_SYNTH_RETRIES ?? process.env.VOICESYSTEM_EDGETTS_SYNTH_RETRIES, 1, 0);
+const EDGETTS_SYNTH_BACKOFF_MS = parseBoundedInt(process.env.ECHO_EDGETTS_SYNTH_BACKOFF_MS ?? process.env.VOICESYSTEM_EDGETTS_SYNTH_BACKOFF_MS, 250, 1);
 const PYTHON3_PATH = '/opt/homebrew/bin/python3';
 
 class EdgeTTSProvider implements TTSProvider {
@@ -936,7 +938,7 @@ export async function getProviderStatus(): Promise<Record<string, { enabled: boo
 // id / identity / fallback), the provider + voice actually used, and any
 // provider failures, circuit-breaker skips, or fallback hops along the way.
 // This is a machine-readable diagnostics stream, kept SEPARATE from the
-// human-readable daemon log (~/Library/Logs/atlas-voicesystem.log).
+// human-readable daemon log (~/Library/Logs/echo.log).
 //
 // Retention: a single size-capped JSONL file. On each write the file is pruned
 // back under the cap by dropping the oldest whole lines (newest always kept).
@@ -944,26 +946,28 @@ export async function getProviderStatus(): Promise<Record<string, { enabled: boo
 // best-effort — a logging failure must NEVER break a /notify.
 //
 // Path: user-owned (macOS ~/Library/Logs, else $XDG_STATE_HOME / ~/.local/state),
-// never /tmp, never the repo. Override with VOICESYSTEM_RESOLUTION_LOG. Host-
-// neutral: no host-adapter knowledge here.
+// never /tmp, never the repo. Override with ECHO_RESOLUTION_LOG (legacy
+// VOICESYSTEM_RESOLUTION_LOG kept as a silent fallback). Host-neutral: no
+// host-adapter knowledge here.
 //
 // Resolved at write time (not frozen at module load) so a process that sets the
-// override after import — e.g. a test setting VOICESYSTEM_RESOLUTION_LOG before
+// override after import — e.g. a test setting ECHO_RESOLUTION_LOG before
 // its first /notify — writes to the intended path regardless of import order.
 // Production behavior is identical: env doesn't change at runtime, so every write
 // resolves the same path the daemon would have captured at startup.
 // =============================================================================
 
 function resolveResolutionLogPath(): string {
-  return process.env.VOICESYSTEM_RESOLUTION_LOG || (
+  return process.env.ECHO_RESOLUTION_LOG ?? process.env.VOICESYSTEM_RESOLUTION_LOG ?? (
     process.platform === 'darwin'
-      ? join(homedir(), 'Library', 'Logs', 'atlas-voicesystem', 'voice-resolution.jsonl')
-      : join(process.env.XDG_STATE_HOME || join(homedir(), '.local', 'state'), 'atlas-voicesystem', 'voice-resolution.jsonl')
+      ? join(homedir(), 'Library', 'Logs', 'echo', 'voice-resolution.jsonl')
+      : join(process.env.XDG_STATE_HOME || join(homedir(), '.local', 'state'), 'echo', 'voice-resolution.jsonl')
   );
 }
 
-// ~1MB cap (floor 1KB). Override via VOICESYSTEM_RESOLUTION_LOG_MAX_BYTES.
-const RESOLUTION_LOG_MAX_BYTES = parseBoundedInt(process.env.VOICESYSTEM_RESOLUTION_LOG_MAX_BYTES, 1_000_000, 1024);
+// ~1MB cap (floor 1KB). Override via ECHO_RESOLUTION_LOG_MAX_BYTES (legacy
+// VOICESYSTEM_RESOLUTION_LOG_MAX_BYTES kept as a silent fallback).
+const RESOLUTION_LOG_MAX_BYTES = parseBoundedInt(process.env.ECHO_RESOLUTION_LOG_MAX_BYTES ?? process.env.VOICESYSTEM_RESOLUTION_LOG_MAX_BYTES, 1_000_000, 1024);
 
 type AttemptOutcome = 'success' | 'failed' | 'unhealthy' | 'circuit-open' | 'disabled';
 

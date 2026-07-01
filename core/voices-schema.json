@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://atlas-voicesystem.local/voices-schema.json",
-  "title": "Atlas Echo voice configuration",
+  "$id": "https://echo.local/voices-schema.json",
+  "title": "Echo voice configuration",
   "type": "object",
   "required": ["providers", "defaultProvider", "fallbackOrder", "identity", "agents"],
   "properties": {

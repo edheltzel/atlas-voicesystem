@@ -4,8 +4,8 @@ import { readFileSync } from "node:fs";
 describe("core server route contract source", () => {
   const server = readFileSync("core/server.ts", "utf8");
 
-  test("keeps neutral default title in core", () => {
-    expect(server).toContain('DEFAULT_NOTIFICATION_TITLE = process.env.VOICESYSTEM_DEFAULT_TITLE || "Voice Notification"');
+  test("keeps neutral default title in core, read from canonical ECHO_* with legacy fallback", () => {
+    expect(server).toContain('DEFAULT_NOTIFICATION_TITLE = process.env.ECHO_DEFAULT_TITLE ?? process.env.VOICESYSTEM_DEFAULT_TITLE ?? "Voice Notification"');
     expect(server).not.toContain("PAI Notification");
   });
 
@@ -36,8 +36,8 @@ describe("core server route contract source", () => {
 
   // --- issue #25: edge-tts fallback tuning (retry + attribution + env knobs) ---
 
-  test("edge-tts synth timeout is env-configurable (VOICESYSTEM_EDGETTS_TIMEOUT_MS, default 15000)", () => {
-    expect(server).toContain("parseBoundedInt(process.env.VOICESYSTEM_EDGETTS_TIMEOUT_MS, 15000, 1)");
+  test("edge-tts synth timeout is env-configurable (ECHO_EDGETTS_TIMEOUT_MS, default 15000)", () => {
+    expect(server).toContain("parseBoundedInt(process.env.ECHO_EDGETTS_TIMEOUT_MS ?? process.env.VOICESYSTEM_EDGETTS_TIMEOUT_MS, 15000, 1)");
   });
 
   test("edge-tts retries transient synthesis failures before recording a provider failure", () => {
@@ -64,11 +64,17 @@ describe("core server route contract source", () => {
 
   test("numeric env overrides are bounded — a bad value cannot mask an outage", () => {
     // timeout/backoff floor 1 (0ms timeout = instant fail), retries floor 0.
-    expect(server).toContain("parseBoundedInt(process.env.VOICESYSTEM_EDGETTS_TIMEOUT_MS, 15000, 1)");
-    expect(server).toContain("parseBoundedInt(process.env.VOICESYSTEM_EDGETTS_SYNTH_RETRIES, 1, 0)");
-    expect(server).toContain("parseBoundedInt(process.env.VOICESYSTEM_EDGETTS_SYNTH_BACKOFF_MS, 250, 1)");
+    expect(server).toContain("parseBoundedInt(process.env.ECHO_EDGETTS_TIMEOUT_MS ?? process.env.VOICESYSTEM_EDGETTS_TIMEOUT_MS, 15000, 1)");
+    expect(server).toContain("parseBoundedInt(process.env.ECHO_EDGETTS_SYNTH_RETRIES ?? process.env.VOICESYSTEM_EDGETTS_SYNTH_RETRIES, 1, 0)");
+    expect(server).toContain("parseBoundedInt(process.env.ECHO_EDGETTS_SYNTH_BACKOFF_MS ?? process.env.VOICESYSTEM_EDGETTS_SYNTH_BACKOFF_MS, 250, 1)");
     // Raw parseInt on these would let NaN/0/negative through.
-    expect(server).not.toContain("parseInt(process.env.VOICESYSTEM_EDGETTS_TIMEOUT_MS");
+    expect(server).not.toContain("parseInt(process.env.ECHO_EDGETTS_TIMEOUT_MS");
+  });
+
+  test("legacy VOICESYSTEM_* env names are retained in source as silent fallbacks", () => {
+    // The canonical ECHO_* name is read first; the old name stays as the `??` tail.
+    expect(server).toContain("process.env.ECHO_EDGETTS_TIMEOUT_MS ?? process.env.VOICESYSTEM_EDGETTS_TIMEOUT_MS");
+    expect(server).toContain("process.env.ECHO_RESOLUTION_LOG ?? process.env.VOICESYSTEM_RESOLUTION_LOG");
   });
 
   test("edge-tts success requires a synthesis attempt to have actually run", () => {

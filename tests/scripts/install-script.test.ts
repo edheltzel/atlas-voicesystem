@@ -30,9 +30,12 @@ describe("install script adapter support", () => {
     expect(script).toContain("pi install");
   });
 
-  test("uses neutral service name and migrates legacy service", () => {
-    expect(script).toContain("com.atlas.voicesystem");
+  test("uses the com.echo service name and migrates both legacy labels", () => {
+    expect(script).toContain('SERVICE_NAME="com.echo"');
+    // Both former labels are quarantined on install: the PAI-named service and
+    // the prior "Atlas" name.
     expect(script).toContain("com.pai.voice-server");
+    expect(script).toContain("com.atlas.voicesystem");
     expect(script).toContain("Quarantining legacy LaunchAgent plist");
   });
 
@@ -55,15 +58,15 @@ describe("install script adapter support", () => {
 
       expect(result.exitCode).toBe(1);
       expect(result.stderr).toContain("Pi CLI is required");
-      expect(existsSync(join(home, "Library/LaunchAgents/com.atlas.voicesystem.plist"))).toBe(false);
+      expect(existsSync(join(home, "Library/LaunchAgents/com.echo.plist"))).toBe(false);
       expect(existsSync(launchctlLog)).toBe(false);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
   });
 
-  test("unloads and quarantines legacy LaunchAgent before loading neutral service", async () => {
-    const root = mkdtempSync(join(tmpdir(), "atlas-install-migration-"));
+  test("unloads and quarantines BOTH legacy LaunchAgents before loading com.echo", async () => {
+    const root = mkdtempSync(join(tmpdir(), "echo-install-migration-"));
     try {
       const home = join(root, "home");
       const bin = join(root, "bin");
@@ -73,8 +76,11 @@ describe("install script adapter support", () => {
       mkdirSync(bin, { recursive: true });
       mkdirSync(state, { recursive: true });
       mkdirSync(launchAgents, { recursive: true });
-      writeFileSync(join(launchAgents, "com.pai.voice-server.plist"), "legacy");
-      writeFileSync(join(state, "legacy-loaded"), "1");
+      // Both former labels exist on disk; the prior "Atlas" service is the one
+      // actually loaded — the realistic reinstall-from-com.atlas.voicesystem case.
+      writeFileSync(join(launchAgents, "com.pai.voice-server.plist"), "legacy-pai");
+      writeFileSync(join(launchAgents, "com.atlas.voicesystem.plist"), "legacy-atlas");
+      writeFileSync(join(state, "atlas-legacy-loaded"), "1");
 
       writeExecutable(join(bin, "bun"), "#!/bin/bash\nexit 0\n");
       writeExecutable(join(bin, "curl"), "#!/bin/bash\nexit 0\n");
@@ -83,17 +89,19 @@ set -e
 echo "$@" >> ${JSON.stringify(launchctlLog)}
 case "$1" in
   list)
-    [ -f ${JSON.stringify(join(state, "atlas-loaded"))} ] && echo "111 0 com.atlas.voicesystem"
-    [ -f ${JSON.stringify(join(state, "legacy-loaded"))} ] && echo "222 0 com.pai.voice-server"
+    [ -f ${JSON.stringify(join(state, "echo-loaded"))} ] && echo "111 0 com.echo"
+    [ -f ${JSON.stringify(join(state, "pai-legacy-loaded"))} ] && echo "222 0 com.pai.voice-server"
+    [ -f ${JSON.stringify(join(state, "atlas-legacy-loaded"))} ] && echo "333 0 com.atlas.voicesystem"
     ;;
   unload)
     case "$2" in
-      *com.pai.voice-server.plist) rm -f ${JSON.stringify(join(state, "legacy-loaded"))} ;;
-      *com.atlas.voicesystem.plist) rm -f ${JSON.stringify(join(state, "atlas-loaded"))} ;;
+      *com.pai.voice-server.plist) rm -f ${JSON.stringify(join(state, "pai-legacy-loaded"))} ;;
+      *com.atlas.voicesystem.plist) rm -f ${JSON.stringify(join(state, "atlas-legacy-loaded"))} ;;
+      *com.echo.plist) rm -f ${JSON.stringify(join(state, "echo-loaded"))} ;;
     esac
     ;;
   load)
-    touch ${JSON.stringify(join(state, "atlas-loaded"))}
+    touch ${JSON.stringify(join(state, "echo-loaded"))}
     ;;
 esac
 exit 0
@@ -105,11 +113,16 @@ exit 0
       });
 
       expect(result.exitCode).toBe(0);
+      // Both legacy plists are quarantined (renamed with a .migrated-<stamp> suffix).
       expect(existsSync(join(launchAgents, "com.pai.voice-server.plist"))).toBe(false);
       expect(readdirSync(launchAgents).some((name) => name.startsWith("com.pai.voice-server.plist.migrated-"))).toBe(true);
-      expect(existsSync(join(launchAgents, "com.atlas.voicesystem.plist"))).toBe(true);
+      expect(existsSync(join(launchAgents, "com.atlas.voicesystem.plist"))).toBe(false);
+      expect(readdirSync(launchAgents).some((name) => name.startsWith("com.atlas.voicesystem.plist.migrated-"))).toBe(true);
+      // The new neutral service plist is written and loaded.
+      expect(existsSync(join(launchAgents, "com.echo.plist"))).toBe(true);
 
       const log = readFileSync(launchctlLog, "utf8");
+      // The loaded legacy (com.atlas.voicesystem) is unloaded before com.echo loads.
       expect(log.indexOf("unload")).toBeGreaterThan(-1);
       expect(log.indexOf("load")).toBeGreaterThan(log.indexOf("unload"));
     } finally {

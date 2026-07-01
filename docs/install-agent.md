@@ -18,9 +18,9 @@ If FAIL: install Bun from <https://bun.sh/>.
 bash scripts/install.sh --adapter none
 ```
 
-Expected: exits 0 and prints `OK atlas-echo is healthy on :8888`.
+Expected: exits 0 and prints `OK echo is healthy on :8888`.
 
-If FAIL: inspect `~/Library/Logs/atlas-voicesystem.log`.
+If FAIL: inspect `~/Library/Logs/echo.log`.
 
 ## 3. Verify health
 
@@ -72,7 +72,7 @@ If FAIL: confirm `command -v pi` works, then run `pi install ./adapters/pi` manu
 bash scripts/status.sh
 ```
 
-Expected: neutral service `com.atlas.voicesystem` is listed or health returns OK.
+Expected: neutral service `com.echo` is listed or health returns OK.
 
 ## 8. Uninstall
 

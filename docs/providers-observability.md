@@ -42,11 +42,12 @@ rolling `pruneResolutionLog` + `classifyResolution`, just above `speakWithFallba
 and a single `writeResolutionEvent` call in `sendNotification`'s voice-enabled path.
 
 - **Path (user-owned, never `/tmp`/repo):** macOS
-  `~/Library/Logs/atlas-voicesystem/voice-resolution.jsonl`, else `$XDG_STATE_HOME`/
-  `~/.local/state` under `atlas-voicesystem/`. Override `VOICESYSTEM_RESOLUTION_LOG`.
-  **Separate** from the human log `~/Library/Logs/atlas-voicesystem.log`.
+  `~/Library/Logs/echo/voice-resolution.jsonl`, else `$XDG_STATE_HOME`/
+  `~/.local/state` under `echo/`. Override `ECHO_RESOLUTION_LOG` (legacy
+  `VOICESYSTEM_RESOLUTION_LOG` still honored as a deprecated fallback).
+  **Separate** from the human log `~/Library/Logs/echo.log`.
 - **Retention:** single size-capped file, `~1MB` default (override
-  `VOICESYSTEM_RESOLUTION_LOG_MAX_BYTES`, floor 1KB via `parseBoundedInt`). On each write,
+  `ECHO_RESOLUTION_LOG_MAX_BYTES`, floor 1KB via `parseBoundedInt`). On each write,
   oldest whole lines are pruned to stay under the cap; the newest line is always kept. No
   external deps, no time-based rotation.
 - **Best-effort:** all write/prune errors are swallowed — logging must never break a
