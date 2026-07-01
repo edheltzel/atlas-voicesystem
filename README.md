@@ -77,7 +77,7 @@ Manual speak request:
 ```bash
 curl -X POST http://localhost:8888/notify \
   -H 'Content-Type: application/json' \
-  -d '{"message":"Hello from Echo"}'
+  -d '{"message":"Hello from echo"}'
 ```
 
 Silent smoke request:
